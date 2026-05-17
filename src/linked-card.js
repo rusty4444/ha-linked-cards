@@ -3,7 +3,7 @@ import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "
 
 const API_ROOT = "linked_cards/templates";
 const TEMPLATE_UPDATED_EVENT = "linked_cards_template_updated";
-const VERSION = "0.1.1";
+const VERSION = "0.1.5";
 
 const templateCache = new Map();
 const templateInflight = new Map();

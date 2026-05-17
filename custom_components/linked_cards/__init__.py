@@ -78,9 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Clean up when removing the integration."""
-    if DOMAIN in hass.data:
-        hass.data[DOMAIN]["data"] = {"templates": {}}
-        hass.data[DOMAIN]["loaded"] = False
+    hass.data.pop(DOMAIN, None)
     return True
 
 
@@ -94,9 +92,12 @@ async def _async_setup_once(hass: HomeAssistant) -> None:
     hass.data[DOMAIN] = {"store": store, "data": data, "loaded": True}
 
     www_path = Path(__file__).parent / "www" / "linked-card.js"
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(STATIC_URL, str(www_path), cache_headers=True)
-    ])
+    try:
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(STATIC_URL, str(www_path), cache_headers=True)
+        ])
+    except ValueError:
+        pass  # already registered (e.g. from a previous setup before unload)
     hass.http.register_view(LinkedCardsTemplatesView)
     hass.http.register_view(LinkedCardsTemplateView)
 

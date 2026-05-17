@@ -2,6 +2,7 @@ import { renderTemplate, validateTemplateId } from "./template.js";
 import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "./source-dashboard.js";
 
 const API_ROOT = "linked_cards/templates";
+const TEMPLATE_UPDATED_EVENT = "linked_cards_template_updated";
 const VERSION = "0.1.1";
 
 const templateCache = new Map();
@@ -207,6 +208,8 @@ class LinkedCard extends HTMLElement {
     this._renderToken++;
     this._externalSourceContainer?.remove();
     this._externalSourceContainer = null;
+    this._unsubscribeTemplateUpdates?.();
+    this._unsubscribeTemplateUpdates = null;
     if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
 
@@ -214,7 +217,22 @@ class LinkedCard extends HTMLElement {
     this._hass = hass;
     if (this._child) this._child.hass = hass;
     this._cards?.forEach((card) => { card.hass = hass; });
+    if (!this._unsubscribeTemplateUpdates && hass?.connection?.subscribeEvents) {
+      hass.connection.subscribeEvents((event) => this._handleTemplateUpdate(event), TEMPLATE_UPDATED_EVENT)
+        .then((unsubscribe) => { this._unsubscribeTemplateUpdates = unsubscribe; })
+        .catch(() => {});
+    }
     if (this.renderRequested) this._scheduleRender();
+  }
+
+  _handleTemplateUpdate(event) {
+    if (event?.data?.template_id) cacheInvalidate(event.data.template_id);
+    else cacheInvalidate();
+    if (!isSourceMode(this.config) && (!event?.data?.template_id || event.data.template_id === this.config?.template)) {
+      this._lastConfigKey = null;
+      this.renderRequested = true;
+      if (this._hass) this._scheduleRender();
+    }
   }
 
   _scheduleRender() {
@@ -592,6 +610,10 @@ class LinkedCardManager extends HTMLElement {
             <button id="save">Save master template</button>
             <button id="delete" class="secondary">Delete selected template</button>
             <button id="reload" class="secondary">Reload</button>
+            <button id="export-template" class="secondary">Export template</button>
+            <button id="export-all" class="secondary">Export all</button>
+            <button id="import-template" class="secondary">Import JSON</button>
+            <input id="import-file" type="file" accept="application/json,.json" hidden />
           </div>
           <div class="hint">Linked cards using this template update after dashboard refresh. No duplicated card YAML.</div>
           <div id="status" class="status"></div>
@@ -603,6 +625,10 @@ class LinkedCardManager extends HTMLElement {
     this.shadowRoot.getElementById("save").addEventListener("click", () => this.save());
     this.shadowRoot.getElementById("delete").addEventListener("click", () => this.delete());
     this.shadowRoot.getElementById("reload").addEventListener("click", () => this.load());
+    this.shadowRoot.getElementById("export-template").addEventListener("click", () => this.exportTemplate());
+    this.shadowRoot.getElementById("export-all").addEventListener("click", () => this.exportAll());
+    this.shadowRoot.getElementById("import-template").addEventListener("click", () => this.shadowRoot.getElementById("import-file").click());
+    this.shadowRoot.getElementById("import-file").addEventListener("change", (event) => this.importTemplate(event));
   }
 
   status(message, error = false) {
@@ -641,6 +667,56 @@ class LinkedCardManager extends HTMLElement {
       this.load();
     } catch (err) {
       this.status(err.message, true);
+    }
+  }
+
+  _downloadJson(filename, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  exportTemplate() {
+    const id = this.shadowRoot.getElementById("template-id").value.trim();
+    try {
+      const payload = JSON.parse(this.shadowRoot.getElementById("template-json").value);
+      this._downloadJson(`${id || "linked-card-template"}.json`, { template_id: id, template: payload });
+      this.status(`Exported '${id}'.`);
+    } catch (err) {
+      this.status(`Cannot export invalid JSON: ${err.message}`, true);
+    }
+  }
+
+  async exportAll() {
+    try {
+      const templates = await fetchAllTemplates(this._hass);
+      this._downloadJson("linked-card-templates.json", { templates });
+      this.status("Exported all templates.");
+    } catch (err) {
+      this.status(err.message, true);
+    }
+  }
+
+  async importTemplate(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const imported = JSON.parse(await file.text());
+      const id = imported.template_id || imported.id || this.shadowRoot.getElementById("template-id").value.trim();
+      const payload = imported.template || imported;
+      if (!validateTemplateId(id)) return this.status("Imported file needs a valid template_id or selected template id", true);
+      if (!payload.card || typeof payload.card !== "object") return this.status("Imported JSON must contain a card object", true);
+      this.shadowRoot.getElementById("template-id").value = id;
+      this.shadowRoot.getElementById("template-json").value = JSON.stringify(payload, null, 2);
+      await this.save();
+    } catch (err) {
+      this.status(`Import failed: ${err.message}`, true);
+    } finally {
+      event.target.value = "";
     }
   }
 

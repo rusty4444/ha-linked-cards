@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, STATIC_URL, STORAGE_KEY, STORAGE_VERSION
+from .const import DOMAIN, EVENT_TEMPLATE_UPDATED, STATIC_URL, STORAGE_KEY, STORAGE_VERSION
 
 _TEMPLATE_ID_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
 _MAX_TEMPLATES = 200
@@ -145,6 +145,7 @@ class LinkedCardsTemplateView(HomeAssistantView):
             return self.json_message(f"Template limit reached ({_MAX_TEMPLATES})", status_code=400)
         templates[template_id] = payload
         await entry["store"].async_save(entry["data"])
+        hass.bus.async_fire(EVENT_TEMPLATE_UPDATED, {"template_id": template_id, "action": "saved"})
         return self.json({"template_id": template_id, "template": payload})
 
     async def delete(self, request: web.Request, template_id: str) -> web.Response:
@@ -156,4 +157,5 @@ class LinkedCardsTemplateView(HomeAssistantView):
         entry = hass.data[DOMAIN]
         entry["data"].setdefault("templates", {}).pop(template_id, None)
         await entry["store"].async_save(entry["data"])
+        hass.bus.async_fire(EVENT_TEMPLATE_UPDATED, {"template_id": template_id, "action": "deleted"})
         return self.json({"template_id": template_id, "deleted": True})

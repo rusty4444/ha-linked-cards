@@ -1,0 +1,7 @@
+dist/
+node_modules/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+coverage/

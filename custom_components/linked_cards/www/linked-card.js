@@ -1,0 +1,35 @@
+var w=/^[a-zA-Z0-9_.-]{1,80}$/;function i(t){return typeof t=="string"&&w.test(t)}function y(t,e){return e?String(e).split(".").reduce((a,r)=>{if(a!=null)return/^\d+$/.test(r)&&Array.isArray(a)?a[Number(r)]:a[r]},t):t}function m(t,e){return t.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g,(a,r)=>{let s=y(e,r);return s==null?"":typeof s=="object"?JSON.stringify(s):String(s)})}function n(t,e={}){return typeof t=="string"?m(t,e):Array.isArray(t)?t.map(a=>n(a,e)):t&&typeof t=="object"?Object.fromEntries(Object.entries(t).map(([a,r])=>[m(a,e),n(r,e)])):t}function b(t={},e={}){return{...t||{},...e||{}}}function p(t,e={}){if(!t||typeof t!="object")throw new Error("Template is missing or invalid");if(!t.card||typeof t.card!="object")throw new Error("Template must contain a card object");return n(t.card,b(t.variables,e))}var o="linked_cards/templates",E="0.1.0";async function u(t){if(window.loadCardHelpers)return(await window.loadCardHelpers()).createCardElement(t);await customElements.whenDefined("hui-card");let e=document.createElement("hui-card");return e.setConfig(t),e}function f(t,e=""){let a=document.createElement("ha-card"),r=document.createElement("div");r.className="card-content";let s=document.createElement("b");s.textContent="Linked Card error";let l=document.createElement("div");if(l.textContent=t,r.append(s,document.createElement("br"),l),e){let h=document.createElement("pre");h.textContent=e,r.append(h)}return a.append(r),a}async function g(t){return(await t.callApi("GET",o)).templates||{}}var d=class extends HTMLElement{setConfig(e){if(!e.template||!i(e.template))throw new Error("linked-card requires a safe template id in `template`");this.config=e,this.attachShadowIfNeeded(),this.renderRequested=!0}attachShadowIfNeeded(){this.shadowRoot||this.attachShadow({mode:"open"})}set hass(e){this._hass=e,this._child&&(this._child.hass=e),this.renderRequested&&(this.renderRequested=!1,this.render().catch(a=>this.showError(a)))}async render(){if(!this._hass||!this.config)return;let a=(await g(this._hass))[this.config.template];if(!a){if(this.config.fallback){this._child=await u(this.config.fallback),this._child.hass=this._hass,this.shadowRoot.replaceChildren(this._child);return}throw new Error(`Template '${this.config.template}' was not found`)}let r=p(a,this.config.variables||{});this._child=await u(r),this._child.hass=this._hass,this.shadowRoot.replaceChildren(this._child)}showError(e){this.shadowRoot.replaceChildren(f(e.message,e.stack))}getCardSize(){return this._child?.getCardSize?.()||3}},c=class extends HTMLElement{setConfig(e){this.config=e||{},this.shadowRoot||this.attachShadow({mode:"open"})}set hass(e){this._hass=e,this.loaded||this.load()}async load(){this.loaded=!0;try{let e=await g(this._hass);this.render(e)}catch(e){this.shadowRoot.replaceChildren(f(e.message,e.stack))}}render(e){let a=Object.keys(e).sort(),r=this.config.template||a[0]||"room-summary",s=JSON.stringify(e[r]||v(),null,2);this.shadowRoot.innerHTML=`
+      <style>
+        ha-card { overflow: hidden; }
+        .wrap { padding: 16px; display: grid; gap: 12px; }
+        label { font-weight: 600; }
+        input, textarea { box-sizing: border-box; width: 100%; font: inherit; }
+        textarea { min-height: 340px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+        .row { display: grid; gap: 6px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        button { cursor: pointer; border: 0; border-radius: 8px; padding: 9px 12px; background: var(--primary-color); color: var(--text-primary-color, white); }
+        button.secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        .hint { color: var(--secondary-text-color); font-size: 12px; }
+        .status { min-height: 20px; }
+      </style>
+      <ha-card header="Linked Card Manager">
+        <div class="wrap">
+          <div class="row">
+            <label>Template id</label>
+            <input id="template-id" placeholder="room-summary" />
+            <div class="hint">Use letters, numbers, dots, underscores or dashes. Example: <code>room-summary</code>.</div>
+          </div>
+          <div class="row">
+            <label>Master card template JSON</label>
+            <textarea id="template-json"></textarea>
+          </div>
+          <div class="actions">
+            <button id="save">Save master template</button>
+            <button id="delete" class="secondary">Delete selected template</button>
+            <button id="reload" class="secondary">Reload</button>
+          </div>
+          <div class="hint">Linked cards using this template update after dashboard refresh. No duplicated card YAML.</div>
+          <div id="status" class="status"></div>
+        </div>
+      </ha-card>`,this.shadowRoot.getElementById("template-id").value=r,this.shadowRoot.getElementById("template-json").value=s,this.shadowRoot.getElementById("save").addEventListener("click",()=>this.save()),this.shadowRoot.getElementById("delete").addEventListener("click",()=>this.delete()),this.shadowRoot.getElementById("reload").addEventListener("click",()=>this.load())}status(e,a=!1){let r=this.shadowRoot.getElementById("status");r.textContent=e,r.style.color=a?"var(--error-color, #db4437)":"var(--success-color, #0b8043)"}async save(){let e=this.shadowRoot.getElementById("template-id").value.trim();if(!i(e))return this.status("Invalid template id",!0);let a;try{a=JSON.parse(this.shadowRoot.getElementById("template-json").value)}catch(r){return this.status(`Invalid JSON: ${r.message}`,!0)}if(!a.card||typeof a.card!="object")return this.status("Template JSON must contain a card object",!0);try{await this._hass.callApi("POST",`${o}/${encodeURIComponent(e)}`,a),this.status(`Saved '${e}'. Refresh dashboards that use it.`)}catch(r){this.status(r.message,!0)}}async delete(){let e=this.shadowRoot.getElementById("template-id").value.trim();if(!i(e))return this.status("Invalid template id",!0);try{await this._hass.callApi("DELETE",`${o}/${encodeURIComponent(e)}`),this.status(`Deleted '${e}'.`),this.loaded=!1,this.load()}catch(a){this.status(a.message,!0)}}getCardSize(){return 6}};function v(){return{description:"Reusable room tile grid. Override area, light and climate per instance.",variables:{area:"Living Room",light:"light.living_room",climate:"climate.living_room"},card:{type:"grid",title:"${area}",columns:2,square:!1,cards:[{type:"tile",entity:"${light}",name:"Lights",features:[{type:"light-brightness"}]},{type:"tile",entity:"${climate}",name:"Climate",features:[{type:"target-temperature"}]}]}}}customElements.define("linked-card",d);customElements.define("linked-card-manager",c);window.customCards=window.customCards||[];window.customCards.push({type:"linked-card",name:"Linked Card",description:"Render a shared master dashboard card by template id."},{type:"linked-card-manager",name:"Linked Card Manager",description:"Create and edit shared master card templates."});console.info(`%c LINKED-CARDS %c v${E} `,"color:#fff;background:#03a9f4;font-weight:700","color:#03a9f4;font-weight:700");
+//# sourceMappingURL=linked-card.js.map

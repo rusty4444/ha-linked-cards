@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Linked Cards",
+        "description": "Enable shared, reusable dashboard card templates for Home Assistant. Create a master card once, then place linked copies across any dashboard."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Linked Cards is already set up. Only one instance is needed."
+    }
+  }
+}

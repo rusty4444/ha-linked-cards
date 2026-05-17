@@ -1,7 +1,7 @@
 import { renderTemplate, validateTemplateId } from "./template.js";
 
 const API_ROOT = "linked_cards/templates";
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 const templateCache = new Map();
 const templateInflight = new Map();

@@ -19,11 +19,15 @@ Community requests repeatedly ask for native "master card", "linked card", or "r
 
 ## What it provides
 
-- `custom:linked-card` — renders a stored master card by template id.
+- `custom:linked-card` — renders a stored master card by template id, or renders cards directly from another dashboard/view.
 - `custom:linked-card-manager` — dashboard card for creating/editing templates from the Home Assistant UI.
+- Visual editor support for `custom:linked-card` instances: template picker, variable overrides, source-dashboard mode, and inline/popup display.
+- Source-dashboard mode compatible with Global-cards-style workflows: maintain pop-ups, headers, or shared UI on a source dashboard and reuse them elsewhere.
 - Home Assistant custom integration storage under `.storage/linked_cards.templates`.
 - Safe variable substitution using `${variable}` placeholders.
-- Any Lovelace card can be the child card: tile, grid, entities, custom cards, etc.
+- Any Lovelace card can be the child card: tile, grid, entities, custom cards, Bubble Card pop-ups, etc.
+- Live template update events: saved/deleted templates re-render affected linked-card instances without waiting for a full dashboard refresh.
+- Template export/import from the manager card.
 - Static JS resource served by the integration at `/linked-cards/linked-card.js`.
 - REST API for advanced users and future UI tooling.
 
@@ -104,6 +108,8 @@ Paste and save this master template:
 
 ### 2. Place linked instances anywhere
 
+Use the Home Assistant visual editor when adding `custom:linked-card`. The editor lets you select **Template** mode, choose a stored template, and enter variable overrides as JSON.
+
 Living room:
 
 ```yaml
@@ -140,6 +146,41 @@ fallback:
   content: Linked card template is not available.
 ```
 
+## Source-dashboard mode
+
+Source-dashboard mode lets you maintain shared cards on a normal Home Assistant dashboard and render them elsewhere. This is useful for Global-cards-style workflows such as Bubble Card pop-ups, shared headers, and reusable navigation sections.
+
+Create a source dashboard, for example `global-cards`, then add the cards you want to reuse with Home Assistant's normal visual editor.
+
+### Inline shared cards
+
+```yaml
+type: custom:linked-card
+mode: source
+source_dashboard: global-cards
+source_view: header
+source_display: inline
+```
+
+- `source_dashboard` is the dashboard `url_path`.
+- `source_view` is optional and can be a view path or view title. Omit it to load all views.
+- `source_display: inline` renders the cards in place.
+- Sections views are supported; card `grid_options.columns` are respected in a 12-column grid fallback.
+
+### Popup/invisible source cards
+
+```yaml
+type: custom:linked-card
+mode: source
+source_dashboard: global-cards
+source_view: popups
+source_display: popup
+```
+
+`source_display: popup` mounts the source cards invisibly under the Lovelace root in normal view mode. In edit mode, the card shows a status panel with the dashboard, view, display mode, and loaded card count.
+
+This pattern works well for Bubble Card pop-ups defined once on a source dashboard and opened from buttons on other dashboards.
+
 ## Template format
 
 ```json
@@ -164,6 +205,27 @@ Rules:
 - Placeholders work in strings and object keys: `${area}`, `${entity}`, `${nested.value}`.
 - Missing variables render as an empty string so a broken template is visible rather than silently using stale values.
 - Template ids may contain letters, numbers, `.`, `_`, and `-` only.
+
+## Manager export/import
+
+The `custom:linked-card-manager` card can:
+
+- save and delete stored templates;
+- export the selected template as JSON;
+- export all templates as a JSON archive;
+- import a template JSON file and save it back to Home Assistant storage.
+
+Imported files may use either of these shapes:
+
+```json
+{ "template_id": "room-summary", "template": { "card": { "type": "tile", "entity": "light.example" } } }
+```
+
+or a raw template payload:
+
+```json
+{ "variables": {}, "card": { "type": "tile", "entity": "light.example" } }
+```
 
 ## API
 
@@ -205,6 +267,22 @@ Content-Type: application/json
 ```http
 DELETE /api/linked_cards/templates/room-summary
 ```
+
+### Live update event
+
+When a template is saved or deleted, the integration fires a Home Assistant event:
+
+```text
+linked_cards_template_updated
+```
+
+Event data:
+
+```json
+{ "template_id": "room-summary", "action": "saved" }
+```
+
+Open linked-card instances subscribe to this event, invalidate the affected cache entry, and re-render matching template-based cards.
 
 ## Example patterns
 
@@ -259,19 +337,21 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 
 ## Limitations
 
-- Dashboards must be refreshed to pick up saved template changes in already-rendered views.
-- This is not a full visual drag-and-drop card editor yet; the manager edits JSON.
+- Source-dashboard mode reads Lovelace dashboard config through the frontend connection; the source dashboard must be accessible to the current user.
+- Source-dashboard configs are cached in the browser for 60 seconds.
+- The manager's template body remains JSON so any Lovelace/custom card can be represented exactly. Use source-dashboard mode when you want to author the shared card itself with Home Assistant's native visual editor.
 - Variables are string interpolation, not arbitrary JavaScript or Jinja. This is intentional for safety and portability.
 - Cross-dashboard use works because templates are stored globally by the integration, not inside a single dashboard config.
 
 ## Roadmap
 
-- Visual template picker/editor.
-- Import duplicated existing dashboard cards as templates.
-- Live update event after saving a template.
-- Template export/import.
-- Per-template usage search across dashboards.
-- Optional variable schema so instances get a proper UI form.
+- [x] Visual template picker/editor for linked-card instances.
+- [x] Source-dashboard mode for Global-cards-style reusable pop-ups/headers.
+- [x] Live update event after saving/deleting a template.
+- [x] Template export/import.
+- [ ] Import duplicated existing dashboard cards as stored templates.
+- [ ] Per-template usage search across dashboards.
+- [ ] Optional variable schema so instances get a richer generated UI form.
 
 ## Development
 
@@ -289,10 +369,10 @@ custom_components/linked_cards/www/linked-card.js
 
 ## Validation performed
 
-- Vitest unit tests for template id validation, recursive variable rendering, default/override behaviour, and package layout.
+- Vitest unit tests for template id validation, recursive variable rendering, default/override behaviour, source-dashboard structure extraction, editor wiring, live event wiring, and package layout.
 - ESBuild bundle generation.
 - Python syntax compilation for the Home Assistant custom component.
-- Independent model/code-review validation notes are in `docs/validation.md`.
+- README verified for v0.1.5 feature coverage: source-dashboard mode, visual editor, live events, export/import, and updated roadmap.
 
 ## License
 

@@ -153,6 +153,14 @@ function statusCard({ sourceDashboard, sourceView, count, mode }) {
 }
 
 class LinkedCard extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("linked-card-editor");
+  }
+
+  static getStubConfig() {
+    return { type: "custom:linked-card", template: "room-summary" };
+  }
+
   constructor() {
     super();
     this._renderToken = 0;
@@ -367,6 +375,168 @@ class LinkedCard extends HTMLElement {
   }
 }
 
+class LinkedCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._templates = {};
+  }
+
+  setConfig(config) {
+    this._config = { ...(config || {}) };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._templatesLoaded) this._loadTemplates();
+  }
+
+  async _loadTemplates() {
+    if (!this._hass) return;
+    this._templatesLoaded = true;
+    try {
+      this._templates = await fetchAllTemplates(this._hass);
+    } catch (_) {
+      this._templates = {};
+    }
+    this._render();
+  }
+
+  _mode() {
+    return isSourceMode(this._config) ? "source" : "template";
+  }
+
+  _emitConfig(next) {
+    this._config = next;
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: next },
+      bubbles: true,
+      composed: true,
+    }));
+    this._render();
+  }
+
+  _updateField(field, value) {
+    const next = { ...(this._config || {}), type: "custom:linked-card" };
+    if (field === "editor_mode") {
+      if (value === "source") {
+        delete next.template;
+        delete next.variables;
+        next.mode = "source";
+        next.source_dashboard = next.source_dashboard || "lovelace";
+        next.source_display = next.source_display || "inline";
+      } else {
+        delete next.mode;
+        delete next.source_dashboard;
+        delete next.source_view;
+        delete next.source_display;
+        next.template = next.template || Object.keys(this._templates).sort()[0] || "room-summary";
+      }
+    } else if (field === "template") {
+      next.template = value;
+    } else if (field === "source_dashboard") {
+      next.source_dashboard = value;
+    } else if (field === "source_view") {
+      if (value) next.source_view = value;
+      else delete next.source_view;
+    } else if (field === "source_display") {
+      next.source_display = value;
+    } else if (field === "variables") {
+      try {
+        next.variables = value.trim() ? JSON.parse(value) : {};
+      } catch (_) {
+        this._variablesError = "Variables must be valid JSON";
+        this._render();
+        return;
+      }
+      this._variablesError = "";
+    }
+    this._emitConfig(next);
+  }
+
+  _render() {
+    if (!this.shadowRoot) return;
+    const config = this._config || {};
+    const mode = this._mode();
+    const templateIds = Object.keys(this._templates).sort();
+    const variableText = JSON.stringify(config.variables || {}, null, 2);
+    this.shadowRoot.innerHTML = `
+      <style>
+        .wrap { display: grid; gap: 12px; }
+        label { display: grid; gap: 6px; font-weight: 600; }
+        select, input, textarea { box-sizing: border-box; width: 100%; font: inherit; }
+        textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+        .hint { color: var(--secondary-text-color); font-size: 12px; font-weight: 400; }
+        .error { color: var(--error-color, #db4437); font-size: 12px; }
+      </style>
+      <div class="wrap">
+        <label>Mode
+          <select id="editor-mode">
+            <option value="template">Template</option>
+            <option value="source">Source dashboard</option>
+          </select>
+        </label>
+        <div id="template-fields">
+          <label>Template
+            <select id="template"></select>
+          </label>
+          <label>Variables
+            <textarea id="variables"></textarea>
+            <span class="hint">JSON object of variable overrides for this linked instance.</span>
+            <span id="variables-error" class="error"></span>
+          </label>
+        </div>
+        <div id="source-fields">
+          <label>Source dashboard
+            <input id="source-dashboard" placeholder="lovelace" />
+            <span class="hint">Dashboard URL path, for example <code>lovelace</code> or <code>global-cards</code>.</span>
+          </label>
+          <label>Source view
+            <input id="source-view" placeholder="popups or view title" />
+            <span class="hint">Optional view path or title. Leave empty to load all views.</span>
+          </label>
+          <label>Source display
+            <select id="source-display">
+              <option value="inline">Inline</option>
+              <option value="popup">Popup/invisible</option>
+            </select>
+          </label>
+        </div>
+      </div>`;
+
+    this.shadowRoot.getElementById("editor-mode").value = mode;
+    const templateFields = this.shadowRoot.getElementById("template-fields");
+    const sourceFields = this.shadowRoot.getElementById("source-fields");
+    templateFields.style.display = mode === "template" ? "grid" : "none";
+    templateFields.style.gap = "12px";
+    sourceFields.style.display = mode === "source" ? "grid" : "none";
+    sourceFields.style.gap = "12px";
+
+    const templateSelect = this.shadowRoot.getElementById("template");
+    const options = templateIds.length ? templateIds : [config.template || "room-summary"];
+    for (const id of options) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      templateSelect.append(option);
+    }
+    templateSelect.value = config.template || options[0] || "room-summary";
+    this.shadowRoot.getElementById("variables").value = variableText;
+    this.shadowRoot.getElementById("variables-error").textContent = this._variablesError || "";
+    this.shadowRoot.getElementById("source-dashboard").value = config.source_dashboard || "";
+    this.shadowRoot.getElementById("source-view").value = config.source_view || "";
+    this.shadowRoot.getElementById("source-display").value = config.source_display || "inline";
+
+    this.shadowRoot.getElementById("editor-mode").addEventListener("change", (event) => this._updateField("editor_mode", event.target.value));
+    templateSelect.addEventListener("change", (event) => this._updateField("template", event.target.value));
+    this.shadowRoot.getElementById("variables").addEventListener("change", (event) => this._updateField("variables", event.target.value));
+    this.shadowRoot.getElementById("source-dashboard").addEventListener("change", (event) => this._updateField("source_dashboard", event.target.value.trim()));
+    this.shadowRoot.getElementById("source-view").addEventListener("change", (event) => this._updateField("source_view", event.target.value.trim()));
+    this.shadowRoot.getElementById("source-display").addEventListener("change", (event) => this._updateField("source_display", event.target.value));
+  }
+}
+
 class LinkedCardManager extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
@@ -495,6 +665,7 @@ function demoTemplate() {
 }
 
 customElements.define("linked-card", LinkedCard);
+customElements.define("linked-card-editor", LinkedCardEditor);
 customElements.define("linked-card-manager", LinkedCardManager);
 window.customCards = window.customCards || [];
 window.customCards.push(

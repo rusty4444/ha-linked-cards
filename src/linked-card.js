@@ -1,4 +1,5 @@
 import { renderTemplate, validateTemplateId } from "./template.js";
+import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "./source-dashboard.js";
 
 const API_ROOT = "linked_cards/templates";
 const VERSION = "0.1.1";
@@ -98,11 +99,57 @@ function errorCard(message, detail = "") {
 function configKey(config) {
   if (!config) return "";
   return JSON.stringify({
-    template: config.template,
+    mode: config.mode || null,
+    template: config.template || null,
+    source_dashboard: config.source_dashboard || null,
+    source_view: config.source_view || null,
     variables: config.variables || null,
     fallback: config.fallback || null,
     card_size: config.card_size ?? null,
   });
+}
+
+function isSourceMode(config) {
+  return config?.mode === "source" || Boolean(config?.source_dashboard);
+}
+
+function findHuiRoot() {
+  return document.querySelector("home-assistant")
+    ?.shadowRoot?.querySelector("home-assistant-main")
+    ?.shadowRoot?.querySelector("ha-drawer")
+    ?.querySelector("partial-panel-resolver ha-panel-lovelace")
+    ?.shadowRoot?.querySelector("hui-root") || null;
+}
+
+function isEditMode() {
+  try {
+    return Boolean(findHuiRoot()?.lovelace?.editMode);
+  } catch (_) {
+    return false;
+  }
+}
+
+function statusCard({ sourceDashboard, sourceView, count, mode }) {
+  const element = document.createElement("ha-card");
+  const content = document.createElement("div");
+  content.className = "card-content";
+  const title = document.createElement("b");
+  title.textContent = "Linked Card source";
+  const lines = [
+    `Dashboard: ${sourceDashboard || "not set"}`,
+    `View: ${sourceView || "all views"}`,
+    `Mode: ${mode}`,
+    `Loaded cards: ${count}`,
+  ];
+  content.append(title);
+  for (const lineText of lines) {
+    content.append(document.createElement("br"));
+    const line = document.createElement("span");
+    line.textContent = lineText;
+    content.append(line);
+  }
+  element.append(content);
+  return element;
 }
 
 class LinkedCard extends HTMLElement {
@@ -116,7 +163,11 @@ class LinkedCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.template || !validateTemplateId(config.template)) {
+    if (isSourceMode(config)) {
+      if (!config.source_dashboard || typeof config.source_dashboard !== "string") {
+        throw new Error("linked-card source mode requires `source_dashboard`");
+      }
+    } else if (!config.template || !validateTemplateId(config.template)) {
       throw new Error("linked-card requires a safe template id in `template`");
     }
     const key = configKey(config);
@@ -137,16 +188,24 @@ class LinkedCard extends HTMLElement {
 
   connectedCallback() {
     this._connected = true;
+    this._editModeChanged = () => {
+      if (isSourceMode(this.config) && this._hass) this._scheduleRender();
+    };
+    window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
 
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
 
   set hass(hass) {
     this._hass = hass;
     if (this._child) this._child.hass = hass;
+    this._cards?.forEach((card) => { card.hass = hass; });
     if (this.renderRequested) this._scheduleRender();
   }
 
@@ -160,6 +219,10 @@ class LinkedCard extends HTMLElement {
 
   async render(token = ++this._renderToken) {
     if (!this._hass || !this.config) return;
+    if (isSourceMode(this.config)) {
+      await this._renderSource(token);
+      return;
+    }
     const template = await fetchTemplate(this._hass, this.config.template);
     if (token !== this._renderToken) return;
     if (!template) {
@@ -174,7 +237,102 @@ class LinkedCard extends HTMLElement {
     await this._mountChild(renderedConfig, childKey, token);
   }
 
+  async _renderSource(token) {
+    const lovelaceConfig = await fetchDashboardConfig(this._hass, this.config.source_dashboard, this.config.source_view || "");
+    if (token !== this._renderToken) return;
+    const structure = extractSourceStructure(lovelaceConfig, this.config.source_view || "");
+    const count = countSourceCards(structure);
+    const childKey = `source:${JSON.stringify({
+      source_dashboard: this.config.source_dashboard,
+      source_view: this.config.source_view || "",
+      structure,
+      edit: isEditMode(),
+    })}`;
+    await this._mountSourceStructure(structure, childKey, token, count);
+  }
+
+  async _mountSourceStructure(structure, childKey, token, count) {
+    if (this._child && childKey === this._lastChildKey) {
+      this._cards?.forEach((card) => { card.hass = this._hass; });
+      return;
+    }
+
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+
+    const displayMode = this.config.source_display || this.config.display || "inline";
+    const edit = isEditMode();
+    const wrapper = document.createElement("div");
+    wrapper.className = "linked-card-source";
+    wrapper.style.display = "grid";
+    wrapper.style.gap = "8px";
+    this._cards = [];
+
+    if (edit) {
+      wrapper.append(statusCard({
+        sourceDashboard: this.config.source_dashboard,
+        sourceView: this.config.source_view || "",
+        count,
+        mode: `source/${displayMode}`,
+      }));
+    }
+
+    if (structure.type === "sections") {
+      const sections = await this._createSectionElements(structure);
+      if (token !== this._renderToken) return;
+      sections.forEach((section) => wrapper.append(section));
+    } else {
+      const cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+      if (token !== this._renderToken) return;
+      cards.forEach((card) => {
+        card.hass = this._hass;
+        this._cards.push(card);
+        wrapper.append(card);
+      });
+    }
+
+    this._child = wrapper;
+    this._lastChildKey = childKey;
+    if (displayMode === "popup" && !edit) {
+      wrapper.style.position = "fixed";
+      wrapper.style.width = "0";
+      wrapper.style.height = "0";
+      wrapper.style.overflow = "hidden";
+      wrapper.style.pointerEvents = "auto";
+      const target = findHuiRoot()?.shadowRoot || document.body;
+      target.append(wrapper);
+      this._externalSourceContainer = wrapper;
+      this.shadowRoot.replaceChildren(document.createComment("linked-card source popup container mounted"));
+      return;
+    }
+    this.shadowRoot.replaceChildren(wrapper);
+  }
+
+  async _createSectionElements(structure) {
+    const sections = [];
+    for (const sectionConfig of structure.sections || []) {
+      const section = document.createElement("div");
+      section.className = "linked-card-source-section";
+      section.style.display = "grid";
+      section.style.gap = "8px";
+      section.style.gridTemplateColumns = "repeat(12, minmax(0, 1fr))";
+      const cards = await Promise.all((sectionConfig.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+      cards.forEach((card, index) => {
+        const cardConfig = sectionConfig.cards[index] || {};
+        const columns = cardConfig.grid_options?.columns || 12;
+        card.style.gridColumn = `span ${Math.min(12, Math.max(1, Number(columns) || 12))}`;
+        card.hass = this._hass;
+        this._cards.push(card);
+        section.append(card);
+      });
+      sections.push(section);
+    }
+    return sections;
+  }
+
   async _mountChild(renderedConfig, childKey, token) {
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
     if (this._child && childKey === this._lastChildKey) {
       this._child.hass = this._hass;
       return;

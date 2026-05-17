@@ -10,7 +10,9 @@ describe("Home Assistant custom integration packaging", () => {
     expect(manifest.config_flow).toBe(true);
     expect(constants).toContain("/linked-cards/linked-card.js");
     expect(init).toContain("/api/linked_cards/templates");
+    expect(init).toContain("/api/linked_cards/templates/{template_id}");
     expect(init).toContain("Administrator privileges are required");
     expect(init).toContain("_MAX_TEMPLATE_BYTES");
+    expect(init).toContain("Template not found");
   });
 });

@@ -116,6 +116,16 @@ class LinkedCardsTemplateView(HomeAssistantView):
     name = "api:linked_cards:template"
     requires_auth = True
 
+    async def get(self, request: web.Request, template_id: str) -> web.Response:
+        if not _valid_template_id(template_id):
+            return self.json_message("Invalid template id", status_code=400)
+        hass: HomeAssistant = request.app["hass"]
+        templates = hass.data[DOMAIN]["data"].get("templates", {})
+        template = templates.get(template_id)
+        if template is None:
+            return self.json_message("Template not found", status_code=404)
+        return self.json({"template_id": template_id, "template": template})
+
     async def post(self, request: web.Request, template_id: str) -> web.Response:
         if not _is_admin(request):
             return _admin_required()

@@ -374,6 +374,8 @@ custom_components/linked_cards/www/linked-card.js
 - Python syntax compilation for the Home Assistant custom component.
 - README verified for v0.1.5 feature coverage: source-dashboard mode, visual editor, live events, export/import, and updated roadmap.
 
+This project was developed with the assistance of AI tools.
+
 ## License
 
 MIT

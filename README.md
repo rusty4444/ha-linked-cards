@@ -22,7 +22,6 @@ Community requests repeatedly ask for native "master card", "linked card", or "r
 - `custom:linked-card` — renders a stored master card by template id, or renders cards directly from another dashboard/view.
 - `custom:linked-section` — renders a stored master section (title + card grid) by template id.
 - `linked-card-manager` — now creates and edits both card and section templates from the Home Assistant UI.
-- `custom:linked-card-manager` — dashboard card for creating/editing templates from the Home Assistant UI.
 - Visual editor support for `custom:linked-card` instances: template picker, variable overrides, source-dashboard mode, and inline/popup display.
 - Source-dashboard mode compatible with Global-cards-style workflows: maintain pop-ups, headers, or shared UI on a source dashboard and reuse them elsewhere.
 - Home Assistant custom integration storage under `.storage/linked_cards.templates`.

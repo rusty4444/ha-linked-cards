@@ -20,6 +20,8 @@ Community requests repeatedly ask for native "master card", "linked card", or "r
 ## What it provides
 
 - `custom:linked-card` — renders a stored master card by template id, or renders cards directly from another dashboard/view.
+- `custom:linked-section` — renders a stored master section (title + card grid) by template id.
+- `linked-card-manager` — now creates and edits both card and section templates from the Home Assistant UI.
 - `custom:linked-card-manager` — dashboard card for creating/editing templates from the Home Assistant UI.
 - Visual editor support for `custom:linked-card` instances: template picker, variable overrides, source-dashboard mode, and inline/popup display.
 - Source-dashboard mode compatible with Global-cards-style workflows: maintain pop-ups, headers, or shared UI on a source dashboard and reuse them elsewhere.
@@ -181,6 +183,78 @@ source_display: popup
 
 This pattern works well for Bubble Card pop-ups defined once on a source dashboard and opened from buttons on other dashboards.
 
+## Linked Sections
+
+Just as linked cards let you define a master card once and reuse it everywhere, linked sections let you define a reusable **section** (title + grid of cards) as a stored template and place it on any dashboard with `custom:linked-section`.
+
+A section template stores a `title` and an array of `cards`, along with optional `grid_options.columns` to control default column sizing. Variables let you parameterise entity IDs, titles, and any other card field.
+
+### Create a section template
+
+Use the manager card and select **Section template** to save a master section:
+
+```json
+{
+  "description": "Reusable room controls section with lights and climate.",
+  "variables": {
+    "area": "Living Room",
+    "light": "light.living_room",
+    "climate": "climate.living_room"
+  },
+  "section": {
+    "title": "${area} Controls",
+    "grid_options": { "columns": 2 },
+    "cards": [
+      {
+        "type": "tile",
+        "entity": "${light}",
+        "name": "Lights",
+        "features": [{ "type": "light-brightness" }]
+      },
+      {
+        "type": "tile",
+        "entity": "${climate}",
+        "name": "Climate",
+        "features": [{ "type": "target-temperature" }]
+      }
+    ]
+  }
+}
+```
+
+### Place a linked section
+
+```yaml
+type: custom:linked-section
+template: room-controls
+variables:
+  area: Living Room
+  light: light.living_room
+  climate: climate.living_room
+```
+
+For the office:
+
+```yaml
+type: custom:linked-section
+template: room-controls
+variables:
+  area: Office
+  light: light.office
+  climate: climate.office
+```
+
+The section renders with the given title and cards, all laid out in a responsive grid. Edit the master template once; refresh dashboards and all uses show the new configuration.
+
+### Section schema
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `title` | Yes | string | Section heading. Supports `${variable}` substitution. |
+| `cards` | Yes | array | Array of Lovelace card configs. |
+| `grid_options.columns` | No | number | Default column count used to size cards that don’t set their own `grid_options.columns`. |
+
+
 ## Template format
 
 ```json
@@ -332,7 +406,7 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 - Normal Home Assistant auth protects the API.
 - Template reads are available to authenticated users so linked cards can render.
 - Template create/update/delete actions require a Home Assistant administrator account.
-- Template ids, size, nesting depth, count and `card.type` are validated server-side.
+- Template ids, size, nesting depth, count, and top-level shape (`card` or `section`) are validated server-side.
 - Do not store secrets in card templates. Treat template JSON like dashboard YAML.
 
 ## Limitations
@@ -346,6 +420,7 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 ## Roadmap
 
 - [x] Visual template picker/editor for linked-card instances.
+- [x] Visual template picker/editor for linked-section instances.
 - [x] Source-dashboard mode for Global-cards-style reusable pop-ups/headers.
 - [x] Live update event after saving/deleting a template.
 - [x] Template export/import.
@@ -372,7 +447,7 @@ custom_components/linked_cards/www/linked-card.js
 - Vitest unit tests for template id validation, recursive variable rendering, default/override behaviour, source-dashboard structure extraction, editor wiring, live event wiring, and package layout.
 - ESBuild bundle generation.
 - Python syntax compilation for the Home Assistant custom component.
-- README verified for v0.1.5 feature coverage: source-dashboard mode, visual editor, live events, export/import, and updated roadmap.
+- README verified for v0.2.0 feature coverage: source-dashboard mode, visual editor, live events, export/import, and updated roadmap.
 
 This project was developed with the assistance of AI tools.
 

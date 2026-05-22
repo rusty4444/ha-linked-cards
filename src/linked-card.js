@@ -1,9 +1,9 @@
-import { renderTemplate, validateTemplateId } from "./template.js";
+import { renderTemplate, renderSection, validateTemplateId } from "./template.js";
 import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "./source-dashboard.js";
 
 const API_ROOT = "linked_cards/templates";
 const TEMPLATE_UPDATED_EVENT = "linked_cards_template_updated";
-const VERSION = "0.1.5";
+const VERSION = "0.2.0";
 
 const templateCache = new Map();
 const templateInflight = new Map();
@@ -603,7 +603,7 @@ class LinkedCardManager extends HTMLElement {
             <div class="hint">Use letters, numbers, dots, underscores or dashes. Example: <code>room-summary</code>.</div>
           </div>
           <div class="row">
-            <label>Master card template JSON</label>
+            <label>Template JSON (card or section)</label>
             <textarea id="template-json"></textarea>
           </div>
           <div class="actions">
@@ -646,7 +646,7 @@ class LinkedCardManager extends HTMLElement {
     } catch (err) {
       return this.status(`Invalid JSON: ${err.message}`, true);
     }
-    if (!payload.card || typeof payload.card !== "object") return this.status("Template JSON must contain a card object", true);
+    if (!payload.card && !payload.section) return this.status("Template JSON must contain a card or a section", true);
     try {
       await this._hass.callApi("POST", `${API_ROOT}/${encodeURIComponent(id)}`, payload);
       cacheInvalidate();
@@ -709,7 +709,7 @@ class LinkedCardManager extends HTMLElement {
       const id = imported.template_id || imported.id || this.shadowRoot.getElementById("template-id").value.trim();
       const payload = imported.template || imported;
       if (!validateTemplateId(id)) return this.status("Imported file needs a valid template_id or selected template id", true);
-      if (!payload.card || typeof payload.card !== "object") return this.status("Imported JSON must contain a card object", true);
+      if (!payload.card && !payload.section) return this.status("Imported JSON must contain a card or a section", true);
       this.shadowRoot.getElementById("template-id").value = id;
       this.shadowRoot.getElementById("template-json").value = JSON.stringify(payload, null, 2);
       await this.save();
@@ -721,6 +721,162 @@ class LinkedCardManager extends HTMLElement {
   }
 
   getCardSize() { return 6; }
+}
+
+class LinkedSection extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("linked-section-editor");
+  }
+
+  static getStubConfig() {
+    return { type: "custom:linked-section", template: "room-controls" };
+  }
+
+  constructor() {
+    super();
+    this._renderToken = 0;
+    this._lastConfigKey = null;
+    this._lastChildKey = null;
+    this._connected = false;
+  }
+
+  setConfig(config) {
+    if (!config.template || !validateTemplateId(config.template)) {
+      throw new Error("linked-section requires a safe template id in `template`");
+    }
+    const key = configKey(config);
+    if (this._lastConfigKey === key) {
+      this.config = config;
+      return;
+    }
+    this.config = config;
+    this._lastConfigKey = key;
+    this.attachShadowIfNeeded();
+    this.renderRequested = true;
+    if (this._hass) this._scheduleRender();
+  }
+
+  attachShadowIfNeeded() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+  }
+
+  connectedCallback() {
+    this._connected = true;
+    this._editModeChanged = () => this._scheduleRender();
+    window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
+    if (this._hass && this.renderRequested) this._scheduleRender();
+  }
+
+  disconnectedCallback() {
+    this._connected = false;
+    this._renderToken++;
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    this._unsubscribeTemplateUpdates?.();
+    this._unsubscribeTemplateUpdates = null;
+    if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._unsubscribeTemplateUpdates && hass?.connection?.subscribeEvents) {
+      hass.connection.subscribeEvents((event) => this._handleTemplateUpdate(event), TEMPLATE_UPDATED_EVENT)
+        .then((unsubscribe) => { this._unsubscribeTemplateUpdates = unsubscribe; })
+        .catch(() => {});
+    }
+    if (this.renderRequested) this._scheduleRender();
+  }
+
+  _handleTemplateUpdate(event) {
+    if (event?.data?.template_id) cacheInvalidate(event.data.template_id);
+    else cacheInvalidate();
+    if (!event?.data?.template_id || event.data.template_id === this.config?.template) {
+      this._lastConfigKey = null;
+      this.renderRequested = true;
+      if (this._hass) this._scheduleRender();
+    }
+  }
+
+  _scheduleRender() {
+    this.renderRequested = false;
+    const token = ++this._renderToken;
+    this.render(token).catch((err) => {
+      if (token === this._renderToken) this.showError(err);
+    });
+  }
+
+  async render(token = ++this._renderToken) {
+    if (!this._hass || !this.config) return;
+    const template = await fetchTemplate(this._hass, this.config.template);
+    if (token !== this._renderToken) return;
+    if (!template) {
+      throw new Error(`Section template '${this.config.template}' was not found`);
+    }
+    const section = renderSection(template, this.config.variables || {});
+    const childKey = `section:${JSON.stringify(section)}`;
+    await this._mountSection(section, childKey, token);
+  }
+
+  async _mountSection(section, childKey, token) {
+    if (this._child && childKey === this._lastChildKey) return;
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+
+    const edit = isEditMode();
+    const wrapper = document.createElement("div");
+    wrapper.className = "linked-card-source";
+    wrapper.style.display = "grid";
+    wrapper.style.gap = "8px";
+    this._cards = [];
+
+    if (edit) {
+      wrapper.append(statusCard({
+        sourceDashboard: "template",
+        sourceView: this.config.template,
+        count: (section.cards || []).length,
+        mode: "section",
+      }));
+    }
+
+    const sectionEl = document.createElement("div");
+    sectionEl.className = "linked-card-source-section";
+    sectionEl.style.display = "grid";
+    sectionEl.style.gap = "8px";
+    sectionEl.style.gridTemplateColumns = "repeat(12, minmax(0, 1fr))";
+
+    const title = section.title ? String(section.title) : "";
+    if (title) {
+      const titleEl = document.createElement("div");
+      titleEl.className = "card-header";
+      titleEl.textContent = title;
+      wrapper.append(titleEl);
+    }
+
+    const maxColumns = section.grid_options?.columns || 4;
+    const cards = await Promise.all((section.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+    cards.forEach((card, index) => {
+      const cardConfig = section.cards[index] || {};
+      const columns = cardConfig.grid_options?.columns || Math.ceil(12 / maxColumns);
+      card.style.gridColumn = `span ${Math.min(12, Math.max(1, Number(columns) || 12))}`;
+      card.hass = this._hass;
+      this._cards.push(card);
+      sectionEl.append(card);
+    });
+
+    wrapper.append(sectionEl);
+    this._child = wrapper;
+    this._lastChildKey = childKey;
+    this.shadowRoot.replaceChildren(wrapper);
+  }
+
+  showError(err) {
+    this.attachShadowIfNeeded();
+    this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
+    this._child = null;
+    this._lastChildKey = null;
+  }
+
+  getCardSize() { return 3; }
 }
 
 function demoTemplate() {
@@ -743,9 +899,11 @@ function demoTemplate() {
 customElements.define("linked-card", LinkedCard);
 customElements.define("linked-card-editor", LinkedCardEditor);
 customElements.define("linked-card-manager", LinkedCardManager);
+customElements.define("linked-section", LinkedSection);
 window.customCards = window.customCards || [];
 window.customCards.push(
   { type: "linked-card", name: "Linked Card", description: "Render a shared master dashboard card by template id." },
-  { type: "linked-card-manager", name: "Linked Card Manager", description: "Create and edit shared master card templates." },
+  { type: "linked-section", name: "Linked Section", description: "Render a shared master dashboard section by template id." },
+  { type: "linked-card-manager", name: "Linked Card Manager", description: "Create and edit shared master card and section templates." },
 );
 console.info(`%c LINKED-CARDS %c v${VERSION} `, "color:#fff;background:#03a9f4;font-weight:700", "color:#03a9f4;font-weight:700");

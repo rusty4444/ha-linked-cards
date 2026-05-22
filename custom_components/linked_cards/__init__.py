@@ -47,10 +47,23 @@ def _validate_template(payload: dict[str, Any]) -> None:
     if _depth(payload) > _MAX_TEMPLATE_DEPTH:
         raise ValueError(f"Template payload is too deeply nested; limit is {_MAX_TEMPLATE_DEPTH}")
     card = payload.get("card")
-    if not isinstance(card, dict):
-        raise ValueError("Template payload must contain a card object")
-    if not isinstance(card.get("type"), str) or not card["type"]:
-        raise ValueError("Template card must contain a string type")
+    section = payload.get("section")
+    if card is not None and section is not None:
+        raise ValueError("Template must contain either a 'card' or a 'section', not both")
+    if card is None and section is None:
+        raise ValueError("Template must contain either a 'card' or a 'section'")
+    if card is not None:
+        if not isinstance(card, dict):
+            raise ValueError("Template card must be an object")
+        if not isinstance(card.get("type"), str) or not card["type"]:
+            raise ValueError("Template card must contain a string type")
+    if section is not None:
+        if not isinstance(section, dict):
+            raise ValueError("Template section must be an object")
+        if not isinstance(section.get("cards"), list):
+            raise ValueError("Template section must contain a 'cards' array")
+        if not isinstance(section.get("title"), str):
+            raise ValueError("Template section must contain a 'title' string")
     variables = payload.get("variables", {})
     if variables is not None and not isinstance(variables, dict):
         raise ValueError("Template variables must be an object")

@@ -42,3 +42,11 @@ export function renderTemplate(template, variables = {}) {
   if (!template.card || typeof template.card !== "object") throw new Error("Template must contain a card object");
   return applyVariables(template.card, mergeVariables(template.variables, variables));
 }
+
+export function renderSection(template, variables = {}) {
+  if (!template || typeof template !== "object") throw new Error("Template is missing or invalid");
+  if (!template.section || typeof template.section !== "object") throw new Error("Template must contain a section object");
+  const section = applyVariables(template.section, mergeVariables(template.variables, variables));
+  if (!Array.isArray(section.cards)) section.cards = [];
+  return section;
+}

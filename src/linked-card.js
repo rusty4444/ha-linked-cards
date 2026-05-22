@@ -834,7 +834,7 @@ class LinkedSection extends HTMLElement {
         sourceDashboard: "template",
         sourceView: this.config.template,
         count: (section.cards || []).length,
-        mode: "section",
+        mode: "section/template",
       }));
     }
 
@@ -852,12 +852,12 @@ class LinkedSection extends HTMLElement {
       wrapper.append(titleEl);
     }
 
-    const maxColumns = section.grid_options?.columns || 4;
+    const sectionGrid = section.grid_options?.columns || 4;
     const cards = await Promise.all((section.cards || []).map((cardConfig) => createCardElement(cardConfig)));
     cards.forEach((card, index) => {
       const cardConfig = section.cards[index] || {};
-      const columns = cardConfig.grid_options?.columns || Math.ceil(12 / maxColumns);
-      card.style.gridColumn = `span ${Math.min(12, Math.max(1, Number(columns) || 12))}`;
+      const columns = Number(cardConfig.grid_options?.columns) || sectionGrid;
+      card.style.gridColumn = `span ${Math.max(1, Math.min(columns, 12))}`;
       card.hass = this._hass;
       this._cards.push(card);
       sectionEl.append(card);

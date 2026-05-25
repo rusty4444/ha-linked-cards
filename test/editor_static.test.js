@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-describe("linked-card visual editor wiring", () => {
-  const source = readFileSync("src/linked-card.js", "utf8");
+const source = readFileSync("src/linked-card.js", "utf8");
 
+describe("card_mod shadow DOM style injection", () => {
+  it("injects resolved card_mod.style into the card shadow root", () => {
+    expect(source).toContain("card_mod?.style");
+    expect(source).toContain('data-lc');
+    expect(source).toContain("shadowRoot");
+  });
+
+  it("uses requestAnimationFrame to defer the injection until the element is rendered", () => {
+    expect(source).toContain("requestAnimationFrame");
+  });
+
+  it("removes any pre-existing injected style before re-injecting", () => {
+    expect(source).toContain('querySelector("style[data-lc]")');
+  });
+});
+
+describe("linked-card visual editor wiring", () => {
   it("registers a visual editor for linked-card", () => {
     expect(source).toContain("customElements.define(\"linked-card-editor\"");
     expect(source).toContain("static getConfigElement()");

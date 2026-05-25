@@ -1,4 +1,4 @@
-import { renderTemplate, renderSection, validateTemplateId } from "./template.js";
+import { renderTemplate, renderSection, validateTemplateId, processCardMod } from "./template.js";
 import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "./source-dashboard.js";
 
 const API_ROOT = "linked_cards/templates";
@@ -69,14 +69,27 @@ async function fetchAllTemplates(hass) {
 }
 
 async function createCardElement(config) {
+  let card;
   if (window.loadCardHelpers) {
-    const helpers = await window.loadCardHelpers();
-    return helpers.createCardElement(config);
+    card = await (await window.loadCardHelpers()).createCardElement(config);
+  } else {
+    await customElements.whenDefined("hui-card");
+    card = document.createElement("hui-card");
+    card.setConfig(config);
   }
-  await customElements.whenDefined("hui-card");
-  const element = document.createElement("hui-card");
-  element.setConfig(config);
-  return element;
+  const style = config?.card_mod?.style;
+  if (style && typeof style === "string" && style.trim()) {
+    requestAnimationFrame(() => {
+      const root = card.shadowRoot;
+      if (!root) return;
+      root.querySelector("style[data-lc]")?.remove();
+      const el = document.createElement("style");
+      el.setAttribute("data-lc", "");
+      el.textContent = style;
+      root.appendChild(el);
+    });
+  }
+  return card;
 }
 
 function errorCard(message, detail = "") {
@@ -308,7 +321,7 @@ class LinkedCard extends HTMLElement {
       if (token !== this._renderToken) return;
       sections.forEach((section) => wrapper.append(section));
     } else {
-      const cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+      const cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
       if (token !== this._renderToken) return;
       cards.forEach((card) => {
         card.hass = this._hass;
@@ -342,7 +355,7 @@ class LinkedCard extends HTMLElement {
       section.style.display = "grid";
       section.style.gap = "8px";
       section.style.gridTemplateColumns = "repeat(12, minmax(0, 1fr))";
-      const cards = await Promise.all((sectionConfig.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+      const cards = await Promise.all((sectionConfig.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
       cards.forEach((card, index) => {
         const cardConfig = sectionConfig.cards[index] || {};
         const columns = cardConfig.grid_options?.columns || 12;

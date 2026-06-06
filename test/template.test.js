@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVariables, renderTemplate, renderSection, validateTemplateId } from "../src/template.js";
+import { applyVariables, processCardMod, renderTemplate, renderSection, validateTemplateId } from "../src/template.js";
 
 describe("template helpers", () => {
   it("rejects unsafe template ids before any storage or API use", () => {
@@ -40,6 +40,99 @@ describe("template helpers", () => {
 
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
+  });
+});
+
+describe("card_mod style normalization", () => {
+  it("passes through a config with no card_mod untouched", () => {
+    const config = { type: "tile", entity: "light.kitchen" };
+    expect(processCardMod(config)).toEqual(config);
+  });
+
+  it("leaves a string card_mod.style unchanged", () => {
+    const config = { type: "tile", card_mod: { style: "ha-card { color: red; }" } };
+    expect(processCardMod(config)).toEqual(config);
+  });
+
+  it("converts a CSS property dict to a CSS block string", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: { "ha-card": { color: "red", "font-size": "14px" } } },
+    });
+    expect(result.card_mod.style).toBe("ha-card {\n  color: red; font-size: 14px;\n}\n");
+  });
+
+  it("handles a shadow-piercing $ key by normalizing its inner CSS dict to a string", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: { "$": { "ha-card": { color: "blue" } } } },
+    });
+    expect(result.card_mod.style).toEqual({ "$": "ha-card {\n  color: blue;\n}\n" });
+  });
+
+  it("flattens an array of CSS property objects into a single CSS block", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: { "ha-card": [{ color: "red" }, { background: "blue" }] } },
+    });
+    expect(result.card_mod.style).toBe("ha-card {\n  color: red; background: blue;\n}\n");
+  });
+
+  it("preserves string items alongside objects in a mixed value array", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: { "ha-card": ["color: red;", { background: "blue" }] } },
+    });
+    expect(result.card_mod.style).toBe("ha-card {\n  color: red; background: blue;\n}\n");
+  });
+
+  it("ignores plain CSS string items in a top-level style array", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: ["ha-card { color: red; }", { ".foo": { background: "blue" } }] },
+    });
+    expect(result.card_mod.style).toBe(".foo {\n  background: blue;\n}\n");
+  });
+
+  it("normalizes a top-level array of CSS dicts by converting and joining them", () => {
+    const result = processCardMod({
+      type: "tile",
+      card_mod: { style: [{ "ha-card": { color: "red" } }, { ".foo": { background: "blue" } }] },
+    });
+    expect(result.card_mod.style).toBe("ha-card {\n  color: red;\n}\n\n.foo {\n  background: blue;\n}\n");
+  });
+
+  it("recursively normalizes card_mod in nested card arrays", () => {
+    const result = processCardMod({
+      type: "grid",
+      cards: [
+        { type: "tile", card_mod: { style: { "ha-card": { color: "green" } } } },
+        { type: "entity", card_mod: { style: "ha-card { background: white; }" } },
+      ],
+    });
+    expect(result.cards[0].card_mod.style).toBe("ha-card {\n  color: green;\n}\n");
+    expect(result.cards[1].card_mod.style).toBe("ha-card { background: white; }");
+  });
+
+  it("renderTemplate resolves card_mod style dicts in the rendered card", () => {
+    const card = renderTemplate({
+      variables: { color: "red" },
+      card: {
+        type: "tile",
+        entity: "light.kitchen",
+        card_mod: { style: { "ha-card": { color: "${color}" } } },
+      },
+    }, {});
+    expect(card.card_mod.style).toBe("ha-card {\n  color: red;\n}\n");
+  });
+
+  it("renderSection resolves card_mod style dicts in section cards", () => {
+    const section = renderSection({
+      section: {
+        cards: [{ type: "tile", card_mod: { style: { "ha-card": { color: "blue" } } } }],
+      },
+    }, {});
+    expect(section.cards[0].card_mod.style).toBe("ha-card {\n  color: blue;\n}\n");
   });
 });
 

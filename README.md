@@ -283,7 +283,8 @@ Rules:
 - `variables` is optional and supplies defaults.
 - Instance variables override template defaults.
 - Placeholders work in strings and object keys: `${area}`, `${entity}`, `${nested.value}`.
-- Missing variables render as an empty string so a broken template is visible rather than silently using stale values.
+- Undeclared placeholders are left exactly as written, so JavaScript template literals inside custom-card code blocks (for example `custom:button-card` using `${state}` or `${variables.foo}`) survive rendering untouched.
+- A variable declared as `null` renders as an empty string. Use that when a placeholder should deliberately collapse to nothing.
 - Template ids may contain letters, numbers, `.`, `_`, and `-` only.
 
 ## Manager export/import
@@ -421,6 +422,7 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 - Source-dashboard configs are cached in the browser for 60 seconds.
 - The manager's template body remains JSON so any Lovelace/custom card can be represented exactly. Use source-dashboard mode when you want to author the shared card itself with Home Assistant's native visual editor.
 - Variables are string interpolation, not arbitrary JavaScript or Jinja. This is intentional for safety and portability.
+- A mistyped variable name renders literally as `${typo}` rather than blanking out, because an unresolved placeholder is indistinguishable from a JavaScript template literal that belongs to the child card.
 - Cross-dashboard use works because templates are stored globally by the integration, not inside a single dashboard config.
 
 ## Roadmap

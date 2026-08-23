@@ -41,6 +41,34 @@ describe("template helpers", () => {
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
   });
+
+  it("leaves undeclared ${...} placeholders untouched, e.g. JS template literals in button-card JS blocks", () => {
+    const rendered = applyVariables({
+      code: "return `<div style=\"width: ${state}%;\"></div>`;",
+    }, {});
+    expect(rendered).toEqual({
+      code: "return `<div style=\"width: ${state}%;\"></div>`;",
+    });
+  });
+
+  it("still substitutes an explicit null variable as an empty string", () => {
+    const rendered = applyVariables({ name: "${name}" }, { name: null });
+    expect(rendered).toEqual({ name: "" });
+  });
+
+  it("leaves a placeholder alone when only part of a nested path resolves", () => {
+    const rendered = applyVariables({ type: "${nested.kind}" }, { nested: {} });
+    expect(rendered).toEqual({ type: "${nested.kind}" });
+  });
+
+  it("honours a null template default so the placeholder still collapses to an empty string", () => {
+    const card = renderTemplate({
+      variables: { name: null },
+      card: { type: "tile", name: "${name}" },
+    }, {});
+
+    expect(card).toEqual({ type: "tile", name: "" });
+  });
 });
 
 describe("card_mod style normalization", () => {

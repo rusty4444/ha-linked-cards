@@ -1,1 +1,1 @@
-{"type":"module","scripts":{"test":"vitest run","build":"node scripts/build.mjs","check":"npm run test && npm run build"},"devDependencies":{"esbuild":"0.28.2","happy-dom":"20.11.2","vitest":"4.1.10"},"dependencies":{}}
+{"type":"module","scripts":{"test":"vitest run","build":"node scripts/build.mjs","check":"npm run test && npm run build"},"devDependencies":{"esbuild":"0.28.2","happy-dom":"20.11.6","vitest":"4.1.10"},"dependencies":{}}

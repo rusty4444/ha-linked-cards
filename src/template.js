@@ -74,7 +74,8 @@ export function resolvePath(source, path) {
 function renderString(value, variables) {
   return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
     const replacement = resolvePath(variables, path);
-    if (replacement === undefined || replacement === null) return "";
+    if (replacement === undefined) return match;
+    if (replacement === null) return "";
     if (typeof replacement === "object") return JSON.stringify(replacement);
     return String(replacement);
   });

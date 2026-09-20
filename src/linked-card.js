@@ -1,4 +1,5 @@
 import { renderTemplate, renderSection, validateTemplateId, processCardMod } from "./template.js";
+import { TemplateSubscription } from "./template-subscription.js";
 import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "./source-dashboard.js";
 
 const API_ROOT = "linked_cards/templates";
@@ -182,6 +183,7 @@ class LinkedCard extends HTMLElement {
     this._lastChildKey = null;
     this._lastChildSize = null;
     this._connected = false;
+    this._templateSub = new TemplateSubscription(TEMPLATE_UPDATED_EVENT, (event) => this._handleTemplateUpdate(event));
   }
 
   setConfig(config) {
@@ -214,6 +216,7 @@ class LinkedCard extends HTMLElement {
       if (isSourceMode(this.config) && this._hass) this._scheduleRender();
     };
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
+    this._templateSub.ensure(this._hass);
   }
 
   disconnectedCallback() {
@@ -221,8 +224,7 @@ class LinkedCard extends HTMLElement {
     this._renderToken++;
     this._externalSourceContainer?.remove();
     this._externalSourceContainer = null;
-    this._unsubscribeTemplateUpdates?.();
-    this._unsubscribeTemplateUpdates = null;
+    this._templateSub.release();
     if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
 
@@ -230,11 +232,7 @@ class LinkedCard extends HTMLElement {
     this._hass = hass;
     if (this._child) this._child.hass = hass;
     this._cards?.forEach((card) => { card.hass = hass; });
-    if (!this._unsubscribeTemplateUpdates && hass?.connection?.subscribeEvents) {
-      hass.connection.subscribeEvents((event) => this._handleTemplateUpdate(event), TEMPLATE_UPDATED_EVENT)
-        .then((unsubscribe) => { this._unsubscribeTemplateUpdates = unsubscribe; })
-        .catch(() => {});
-    }
+    if (this._connected) this._templateSub.ensure(hass);
     if (this.renderRequested) this._scheduleRender();
   }
 
@@ -751,6 +749,7 @@ class LinkedSection extends HTMLElement {
     this._lastConfigKey = null;
     this._lastChildKey = null;
     this._connected = false;
+    this._templateSub = new TemplateSubscription(TEMPLATE_UPDATED_EVENT, (event) => this._handleTemplateUpdate(event));
   }
 
   setConfig(config) {
@@ -777,6 +776,7 @@ class LinkedSection extends HTMLElement {
     this._connected = true;
     this._editModeChanged = () => this._scheduleRender();
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
+    this._templateSub.ensure(this._hass);
     if (this._hass && this.renderRequested) this._scheduleRender();
   }
 
@@ -785,18 +785,13 @@ class LinkedSection extends HTMLElement {
     this._renderToken++;
     this._externalSourceContainer?.remove();
     this._externalSourceContainer = null;
-    this._unsubscribeTemplateUpdates?.();
-    this._unsubscribeTemplateUpdates = null;
+    this._templateSub.release();
     if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._unsubscribeTemplateUpdates && hass?.connection?.subscribeEvents) {
-      hass.connection.subscribeEvents((event) => this._handleTemplateUpdate(event), TEMPLATE_UPDATED_EVENT)
-        .then((unsubscribe) => { this._unsubscribeTemplateUpdates = unsubscribe; })
-        .catch(() => {});
-    }
+    if (this._connected) this._templateSub.ensure(hass);
     if (this.renderRequested) this._scheduleRender();
   }
 

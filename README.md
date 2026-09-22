@@ -34,7 +34,7 @@ Community requests repeatedly ask for native "master card", "linked card", or "r
 - Home Assistant custom integration storage under `.storage/linked_cards.templates`.
 - Safe variable substitution using `${variable}` placeholders.
 - Any Lovelace card can be the child card: tile, grid, entities, custom cards, Bubble Card pop-ups, etc.
-- Live template update events: saved/deleted templates re-render affected linked-card instances without waiting for a full dashboard refresh.
+- Live template update events: saved/deleted templates re-render affected linked-card instances without waiting for a full dashboard refresh (administrator accounts only; see [Live update event](#live-update-event)).
 - Template export/import from the manager card.
 - Static JS resource served by the integration at `/linked-cards/linked-card.js`.
 - REST API for advanced users and future UI tooling.
@@ -365,6 +365,8 @@ Event data:
 
 Open linked-card instances subscribe to this event, invalidate the affected cache entry, and re-render matching template-based cards.
 
+Home Assistant only allows administrators to subscribe to custom events, so this live refresh is active for administrator accounts only. Other users receive template changes after a full browser or app reload; switching dashboards or views is not enough, because templates are cached in the browser for the lifetime of the page.
+
 ## Example patterns
 
 ### Shared navigation card
@@ -420,6 +422,7 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 
 - Source-dashboard mode reads Lovelace dashboard config through the frontend connection; the source dashboard must be accessible to the current user.
 - Source-dashboard configs are cached in the browser for 60 seconds.
+- Live template updates need an administrator account. Other users see template changes after a full browser or app reload (for example a wall tablet logged in as a non-admin user).
 - The manager's template body remains JSON so any Lovelace/custom card can be represented exactly. Use source-dashboard mode when you want to author the shared card itself with Home Assistant's native visual editor.
 - Variables are string interpolation, not arbitrary JavaScript or Jinja. This is intentional for safety and portability.
 - A mistyped variable name renders literally as `${typo}` rather than blanking out, because an unresolved placeholder is indistinguishable from a JavaScript template literal that belongs to the child card.

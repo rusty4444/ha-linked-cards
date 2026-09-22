@@ -12,7 +12,8 @@ describe("live update and export/import wiring", () => {
   });
 
   it("linked cards subscribe to template update events and invalidate cache", () => {
-    expect(frontend).toContain("subscribeEvents");
+    expect(frontend).toContain("TemplateSubscription");
+    expect(readFileSync("src/template-subscription.js", "utf8")).toContain("subscribeEvents");
     expect(frontend).toContain("linked_cards_template_updated");
     expect(frontend).toContain("cacheInvalidate(event.data.template_id)");
   });

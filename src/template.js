@@ -92,8 +92,81 @@ export function applyVariables(value, variables = {}) {
   return value;
 }
 
+export function resolveVariables(variables = {}) {
+  const source = variables && typeof variables === "object" && !Array.isArray(variables)
+    ? variables
+    : {};
+  const resolved = new Map();
+  const resolving = [];
+
+  function readRawPath(parts) {
+    let value = source;
+    for (const part of parts) {
+      if (value === null || value === undefined || typeof value !== "object") {
+        return { found: false };
+      }
+      if (!Object.prototype.hasOwnProperty.call(value, part)) return { found: false };
+      value = value[part];
+    }
+    return { found: value !== undefined, value };
+  }
+
+  function resolvePathParts(parts) {
+    const cacheKey = JSON.stringify(parts);
+    if (resolved.has(cacheKey)) return resolved.get(cacheKey);
+
+    const cycleStart = resolving.indexOf(cacheKey);
+    if (cycleStart !== -1) {
+      const cycle = [...resolving.slice(cycleStart), cacheKey]
+        .map((key) => JSON.parse(key).join("."))
+        .join(" -> ");
+      throw new Error(`Circular variable reference detected: ${cycle}`);
+    }
+
+    const raw = readRawPath(parts);
+    if (!raw.found) return undefined;
+
+    resolving.push(cacheKey);
+    const value = resolveValue(raw.value, parts);
+    resolving.pop();
+    resolved.set(cacheKey, value);
+    return value;
+  }
+
+  function resolveString(value) {
+    return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
+      const parts = String(path).split(".");
+      if (!readRawPath(parts).found) return match;
+      const replacement = resolvePathParts(parts);
+      if (replacement === null) return "";
+      if (typeof replacement === "object") return JSON.stringify(replacement);
+      return String(replacement);
+    });
+  }
+
+  function resolveValue(value, parts) {
+    if (typeof value === "string") return resolveString(value);
+    if (Array.isArray(value)) {
+      return value.map((_, index) => resolvePathParts([...parts, String(index)]));
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.keys(value).map((key) => [
+          resolveString(key),
+          resolvePathParts([...parts, key]),
+        ]),
+      );
+    }
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.keys(source).map((key) => [resolveString(key), resolvePathParts([key])]),
+  );
+}
+
 export function mergeVariables(defaults = {}, overrides = {}) {
-  return { ...(defaults || {}), ...(overrides || {}) };
+  return resolveVariables({ ...(defaults || {}), ...(overrides || {}) });
 }
 
 export function renderTemplate(template, variables = {}) {

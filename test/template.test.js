@@ -38,6 +38,58 @@ describe("template helpers", () => {
     expect(card).toEqual({ type: "tile", entity: "light.bedroom", icon: "mdi:lightbulb" });
   });
 
+  it("recursively resolves variables using the merged instance overrides", () => {
+    const card = renderTemplate({
+      variables: {
+        entity_base_name: "plug_1",
+        switch_entity: "switch.${entity_base_name}_switch",
+        label: "Control ${switch_entity}",
+      },
+      card: { type: "tile", entity: "${switch_entity}", name: "${label}" },
+    }, { entity_base_name: "plug_2" });
+
+    expect(card).toEqual({
+      type: "tile",
+      entity: "switch.plug_2_switch",
+      name: "Control switch.plug_2_switch",
+    });
+  });
+
+  it("honours an instance override for a derived variable", () => {
+    const card = renderTemplate({
+      variables: {
+        entity_base_name: "plug_1",
+        power_entity: "sensor.${entity_base_name}_power",
+      },
+      card: { type: "tile", entity: "${power_entity}" },
+    }, {
+      entity_base_name: "plug_3",
+      power_entity: "sensor.plug_3_helper_power",
+    });
+
+    expect(card.entity).toBe("sensor.plug_3_helper_power");
+  });
+
+  it("resolves nested variable paths without flattening the variable object", () => {
+    const card = renderTemplate({
+      variables: {
+        entity_base_name: "plug_1",
+        entities: { power: "sensor.${entity_base_name}_power" },
+        power_entity: "${entities.power}",
+      },
+      card: { type: "tile", entity: "${power_entity}" },
+    }, {});
+
+    expect(card.entity).toBe("sensor.plug_1_power");
+  });
+
+  it("rejects circular variable references with the dependency chain", () => {
+    expect(() => renderTemplate({
+      variables: { first: "${second}", second: "${first}" },
+      card: { type: "markdown", content: "${first}" },
+    }, {})).toThrow("Circular variable reference detected: first -> second -> first");
+  });
+
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
   });

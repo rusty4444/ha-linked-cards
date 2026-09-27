@@ -50,3 +50,21 @@ describe.each(["linked-card", "linked-section"])("%s template subscription lifec
     el.remove();
   });
 });
+
+describe("linked-section child state", () => {
+  it("propagates every hass update to mounted child cards", () => {
+    const el = document.createElement("linked-section");
+    const children = [{}, {}];
+    el._cards = children;
+
+    const firstHass = { states: { "switch.test": { state: "off" } } };
+    el.hass = firstHass;
+    expect(children[0].hass).toBe(firstHass);
+    expect(children[1].hass).toBe(firstHass);
+
+    const updatedHass = { states: { "switch.test": { state: "on" } } };
+    el.hass = updatedHass;
+    expect(children[0].hass).toBe(updatedHass);
+    expect(children[1].hass).toBe(updatedHass);
+  });
+});

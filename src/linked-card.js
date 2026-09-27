@@ -791,6 +791,7 @@ class LinkedSection extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._cards?.forEach((card) => { card.hass = hass; });
     if (this._connected) this._templateSub.ensure(hass);
     if (this.renderRequested) this._scheduleRender();
   }

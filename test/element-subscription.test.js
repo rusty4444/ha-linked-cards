@@ -10,6 +10,9 @@ function makeHass(user = { is_admin: true }) {
 }
 
 beforeAll(async () => {
+  window.loadCardHelpers = vi.fn(async () => ({
+    createCardElement: vi.fn(async () => document.createElement("ha-card")),
+  }));
   await import("../src/linked-card.js");
 });
 
@@ -66,5 +69,33 @@ describe("linked-section child state", () => {
     el.hass = updatedHass;
     expect(children[0].hass).toBe(updatedHass);
     expect(children[1].hass).toBe(updatedHass);
+  });
+});
+
+describe.each([
+  ["linked-card", { card: { type: "tile", entity: "light.test" } }],
+  ["linked-section", { section: { title: "Test", cards: [] } }],
+])("%s reconnect rendering", (tag, template) => {
+  it("restarts an initial render invalidated by a detach and re-attach", async () => {
+    let resolveTemplate;
+    const templateResponse = new Promise((resolve) => { resolveTemplate = resolve; });
+    const { hass } = makeHass();
+    hass.callApi = vi.fn(() => templateResponse);
+
+    const el = document.createElement(tag);
+    el.setConfig({ type: `custom:${tag}`, template: `reconnect-${tag}` });
+    document.body.append(el);
+    el.hass = hass;
+    await flush();
+
+    el.remove();
+    document.body.append(el);
+    resolveTemplate({ template });
+    await flush();
+    await flush();
+
+    expect(el.shadowRoot.children).toHaveLength(1);
+    expect(el._child).toBeTruthy();
+    el.remove();
   });
 });

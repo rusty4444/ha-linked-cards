@@ -217,6 +217,7 @@ class LinkedCard extends HTMLElement {
     };
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
+    if (this._hass && this.config && !this._child) this._scheduleRender();
   }
 
   disconnectedCallback() {
@@ -777,7 +778,7 @@ class LinkedSection extends HTMLElement {
     this._editModeChanged = () => this._scheduleRender();
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
-    if (this._hass && this.renderRequested) this._scheduleRender();
+    if (this._hass && this.config && (this.renderRequested || !this._child)) this._scheduleRender();
   }
 
   disconnectedCallback() {

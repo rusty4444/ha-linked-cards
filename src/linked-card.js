@@ -566,7 +566,62 @@ class LinkedCardEditor extends HTMLElement {
   }
 }
 
+class LinkedCardManagerEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+  }
+
+  setConfig(config) {
+    this._config = { ...(config || {}) };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  _updateTemplate(value) {
+    const next = {
+      ...(this._config || {}),
+      type: "custom:linked-card-manager",
+      template: value.trim(),
+    };
+    this._config = next;
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: next },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  _render() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.innerHTML = `
+      <style>
+        label { display: grid; gap: 6px; font-weight: 600; }
+        input { box-sizing: border-box; width: 100%; font: inherit; }
+        .hint { color: var(--secondary-text-color); font-size: 12px; font-weight: 400; }
+      </style>
+      <label>Template id to open
+        <input id="template" placeholder="room-summary" />
+        <span class="hint">Each manager card keeps this selection after a dashboard reload.</span>
+      </label>`;
+    const input = this.shadowRoot.getElementById("template");
+    input.value = this._config?.template || "";
+    input.addEventListener("change", (event) => this._updateTemplate(event.target.value));
+  }
+}
+
 class LinkedCardManager extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("linked-card-manager-editor");
+  }
+
+  static getStubConfig() {
+    return { type: "custom:linked-card-manager", template: "room-summary" };
+  }
+
   setConfig(config) {
     this.config = config || {};
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
@@ -590,14 +645,15 @@ class LinkedCardManager extends HTMLElement {
 
   render(templates) {
     const ids = Object.keys(templates).sort();
-    const selected = this.config.template || ids[0] || "room-summary";
+    const configured = this.config.template;
+    const selected = configured && templates[configured] ? configured : ids[0] || configured || "room-summary";
     const value = JSON.stringify(templates[selected] || demoTemplate(), null, 2);
     this.shadowRoot.innerHTML = `
       <style>
         ha-card { overflow: hidden; }
         .wrap { padding: 16px; display: grid; gap: 12px; }
         label { font-weight: 600; }
-        input, textarea { box-sizing: border-box; width: 100%; font: inherit; }
+        input, select, textarea { box-sizing: border-box; width: 100%; font: inherit; }
         textarea { min-height: 340px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
         .row { display: grid; gap: 6px; }
         .actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -608,6 +664,13 @@ class LinkedCardManager extends HTMLElement {
       </style>
       <ha-card header="Linked Card Manager">
         <div class="wrap">
+          <div class="row">
+            <label>Stored template</label>
+            <select id="stored-template">
+              <option value="">New template…</option>
+            </select>
+            <div class="hint">Choose a saved template to edit, or select “New template…” to start another one.</div>
+          </div>
           <div class="row">
             <label>Template id</label>
             <input id="template-id" placeholder="room-summary" />
@@ -631,6 +694,15 @@ class LinkedCardManager extends HTMLElement {
         </div>
       </ha-card>`;
 
+    const storedSelect = this.shadowRoot.getElementById("stored-template");
+    for (const id of ids) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      storedSelect.append(option);
+    }
+    storedSelect.value = templates[selected] ? selected : "";
+    storedSelect.addEventListener("change", (event) => this._selectTemplate(event.target.value, templates));
     this.shadowRoot.getElementById("template-id").value = selected;
     this.shadowRoot.getElementById("template-json").value = value;
     this.shadowRoot.getElementById("save").addEventListener("click", () => this.save());
@@ -640,6 +712,22 @@ class LinkedCardManager extends HTMLElement {
     this.shadowRoot.getElementById("export-all").addEventListener("click", () => this.exportAll());
     this.shadowRoot.getElementById("import-template").addEventListener("click", () => this.shadowRoot.getElementById("import-file").click());
     this.shadowRoot.getElementById("import-file").addEventListener("change", (event) => this.importTemplate(event));
+  }
+
+  _selectTemplate(id, templates) {
+    const selectedTemplate = templates[id];
+    if (!selectedTemplate) {
+      this.config = { ...(this.config || {}) };
+      delete this.config.template;
+      this.shadowRoot.getElementById("template-id").value = "";
+      this.shadowRoot.getElementById("template-json").value = JSON.stringify(demoTemplate(), null, 2);
+      this.status("Enter a unique template id, then edit and save the JSON.");
+      return;
+    }
+    this.config = { ...(this.config || {}), template: id };
+    this.shadowRoot.getElementById("template-id").value = id;
+    this.shadowRoot.getElementById("template-json").value = JSON.stringify(selectedTemplate, null, 2);
+    this.status(`Loaded '${id}'.`);
   }
 
   status(message, error = false) {
@@ -661,6 +749,9 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("POST", `${API_ROOT}/${encodeURIComponent(id)}`, payload);
       cacheInvalidate();
+      this.config = { ...(this.config || {}), template: id };
+      this.loaded = false;
+      await this.load();
       this.status(`Saved '${id}'. Refresh dashboards that use it.`);
     } catch (err) {
       this.status(err.message, true);
@@ -673,9 +764,13 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("DELETE", `${API_ROOT}/${encodeURIComponent(id)}`);
       cacheInvalidate();
-      this.status(`Deleted '${id}'.`);
+      if (this.config?.template === id) {
+        this.config = { ...this.config };
+        delete this.config.template;
+      }
       this.loaded = false;
-      this.load();
+      await this.load();
+      this.status(`Deleted '${id}'.`);
     } catch (err) {
       this.status(err.message, true);
     }
@@ -907,6 +1002,7 @@ function demoTemplate() {
 
 customElements.define("linked-card", LinkedCard);
 customElements.define("linked-card-editor", LinkedCardEditor);
+customElements.define("linked-card-manager-editor", LinkedCardManagerEditor);
 customElements.define("linked-card-manager", LinkedCardManager);
 customElements.define("linked-section", LinkedSection);
 window.customCards = window.customCards || [];

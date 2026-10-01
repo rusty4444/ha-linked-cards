@@ -1,4 +1,6 @@
 export const TEMPLATE_ID_PATTERN = /^[a-zA-Z0-9_.-]{1,80}$/;
+const VARIABLE_PATTERN = /\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const WHOLE_VARIABLE_PATTERN = /^\$\{\s*([a-zA-Z0-9_.-]+)\s*\}$/;
 
 function convertStyleValue(val) {
   if (typeof val === "string") return val;
@@ -72,7 +74,15 @@ export function resolvePath(source, path) {
 }
 
 function renderString(value, variables) {
-  return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
+  const wholeMatch = value.match(WHOLE_VARIABLE_PATTERN);
+  if (wholeMatch) {
+    const replacement = resolvePath(variables, wholeMatch[1]);
+    // Keep the established null-as-empty-string behaviour while preserving
+    // every other resolved value's native type.
+    if (replacement !== undefined && replacement !== null) return replacement;
+  }
+
+  return value.replace(VARIABLE_PATTERN, (match, path) => {
     const replacement = resolvePath(variables, path);
     if (replacement === undefined) return match;
     if (replacement === null) return "";
@@ -86,7 +96,9 @@ export function applyVariables(value, variables = {}) {
   if (Array.isArray(value)) return value.map((item) => applyVariables(item, variables));
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [renderString(key, variables), applyVariables(child, variables)]),
+      // Object keys must remain property keys even if a whole-value variable
+      // resolves to a number, boolean, array, or object.
+      Object.entries(value).map(([key, child]) => [String(renderString(key, variables)), applyVariables(child, variables)]),
     );
   }
   return value;

@@ -29,6 +29,57 @@ describe("template helpers", () => {
     });
   });
 
+  it("preserves native types for whole-value substitutions", () => {
+    const rendered = applyVariables({
+      number: "${number}",
+      enabled: "${enabled}",
+      config: "${config}",
+      items: "${items}",
+    }, {
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+      items: ["one", "two"],
+    });
+
+    expect(rendered).toEqual({
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+      items: ["one", "two"],
+    });
+  });
+
+  it("keeps embedded variables as string interpolation", () => {
+    const rendered = applyVariables({
+      number: "Value: ${number}",
+      enabled: "Enabled: ${enabled}",
+      config: "Config: ${config}",
+    }, {
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+    });
+
+    expect(rendered).toEqual({
+      number: "Value: 10",
+      enabled: "Enabled: true",
+      config: 'Config: {"foo":"bar"}',
+    });
+  });
+
+  it("keeps rendered object keys as strings", () => {
+    const rendered = applyVariables({
+      "${number}": "numeric key",
+      "${config}": "object key",
+    }, { number: 10, config: { foo: "bar" } });
+
+    expect(rendered).toEqual({
+      "10": "numeric key",
+      "[object Object]": "object key",
+    });
+  });
+
   it("combines template defaults and instance variables when rendering a linked card", () => {
     const card = renderTemplate({
       variables: { icon: "mdi:lightbulb", area: "living_room" },

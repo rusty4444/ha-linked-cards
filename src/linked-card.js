@@ -623,8 +623,13 @@ class LinkedCardManager extends HTMLElement {
   }
 
   setConfig(config) {
+    const previousTemplate = this.config?.template;
     this.config = config || {};
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (this.loaded && previousTemplate !== this.config.template && this._hass) {
+      this.loaded = false;
+      this.load();
+    }
   }
 
   set hass(hass) {
@@ -646,7 +651,9 @@ class LinkedCardManager extends HTMLElement {
   render(templates) {
     const ids = Object.keys(templates).sort();
     const configured = this.config.template;
-    const selected = configured && templates[configured] ? configured : ids[0] || configured || "room-summary";
+    // A configured id is authoritative even before that template exists. Do
+    // not silently open and risk overwriting the first stored template.
+    const selected = configured || ids[0] || "room-summary";
     const value = JSON.stringify(templates[selected] || demoTemplate(), null, 2);
     this.shadowRoot.innerHTML = `
       <style>

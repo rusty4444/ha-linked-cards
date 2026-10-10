@@ -1,4 +1,6 @@
 export const TEMPLATE_ID_PATTERN = /^[a-zA-Z0-9_.-]{1,80}$/;
+const VARIABLE_PATTERN = /\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const WHOLE_VARIABLE_PATTERN = /^\$\{\s*([a-zA-Z0-9_.-]+)\s*\}$/;
 
 function convertStyleValue(val) {
   if (typeof val === "string") return val;
@@ -71,8 +73,8 @@ export function resolvePath(source, path) {
   }, source);
 }
 
-function renderString(value, variables) {
-  return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
+function renderInterpolatedString(value, variables) {
+  return value.replace(VARIABLE_PATTERN, (match, path) => {
     const replacement = resolvePath(variables, path);
     if (replacement === undefined) return match;
     if (replacement === null) return "";
@@ -81,12 +83,27 @@ function renderString(value, variables) {
   });
 }
 
+function renderString(value, variables) {
+  const wholeMatch = value.match(WHOLE_VARIABLE_PATTERN);
+  if (wholeMatch) {
+    const replacement = resolvePath(variables, wholeMatch[1]);
+    // Keep the established null-as-empty-string behaviour while preserving
+    // every other resolved value's native type.
+    if (replacement !== undefined && replacement !== null) return replacement;
+  }
+
+  return renderInterpolatedString(value, variables);
+}
+
 export function applyVariables(value, variables = {}) {
   if (typeof value === "string") return renderString(value, variables);
   if (Array.isArray(value)) return value.map((item) => applyVariables(item, variables));
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [renderString(key, variables), applyVariables(child, variables)]),
+      // Keys always use interpolation semantics. This retains the established
+      // JSON representation for object and array variables instead of native
+      // whole-value coercion such as "[object Object]" or comma joining.
+      Object.entries(value).map(([key, child]) => [renderInterpolatedString(key, variables), applyVariables(child, variables)]),
     );
   }
   return value;

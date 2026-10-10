@@ -86,6 +86,39 @@ describe("linked-card-manager template selection", () => {
     expect(templates.expander_WLED).toEqual(expanderTemplate);
     expect(manager.shadowRoot.getElementById("stored-template").value).toBe("expander_WLED");
   });
+
+  it("keeps a configured new id instead of falling back to the first template", async () => {
+    const { hass, templates } = makeHass({ "room-summary": roomTemplate });
+    const manager = document.createElement("linked-card-manager");
+    manager.setConfig({ type: "custom:linked-card-manager", template: "new-template" });
+    manager.hass = hass;
+    await flush();
+
+    expect(manager.shadowRoot.getElementById("stored-template").value).toBe("");
+    expect(manager.shadowRoot.getElementById("template-id").value).toBe("new-template");
+    expect(JSON.parse(manager.shadowRoot.getElementById("template-json").value)).toHaveProperty("card");
+
+    await manager.save();
+    expect(templates["room-summary"]).toEqual(roomTemplate);
+    expect(templates["new-template"]).toHaveProperty("card");
+  });
+
+  it("reloads when Home Assistant applies a different configured template", async () => {
+    const { hass } = makeHass({
+      "room-summary": roomTemplate,
+      expander_WLED: expanderTemplate,
+    });
+    const manager = document.createElement("linked-card-manager");
+    manager.setConfig({ type: "custom:linked-card-manager", template: "room-summary" });
+    manager.hass = hass;
+    await flush();
+
+    manager.setConfig({ type: "custom:linked-card-manager", template: "expander_WLED" });
+    await flush();
+
+    expect(manager.shadowRoot.getElementById("template-id").value).toBe("expander_WLED");
+    expect(JSON.parse(manager.shadowRoot.getElementById("template-json").value)).toEqual(expanderTemplate);
+  });
 });
 
 describe("linked-card-manager visual editor", () => {

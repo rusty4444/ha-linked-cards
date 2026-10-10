@@ -1,4 +1,7 @@
 export const TEMPLATE_ID_PATTERN = /^[a-zA-Z0-9_.-]{1,80}$/;
+const VARIABLE_PATTERN = /\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const MAX_VARIABLE_RESOLUTION_DEPTH = 32;
+const MAX_VARIABLE_EXPANSION_SIZE = 256 * 1024;
 
 function convertStyleValue(val) {
   if (typeof val === "string") return val;
@@ -97,7 +100,19 @@ export function resolveVariables(variables = {}) {
     ? variables
     : {};
   const resolved = new Map();
+  const resolvedDepth = new Map();
   const resolving = [];
+  const depthFrames = [];
+  let expansionBudget = MAX_VARIABLE_EXPANSION_SIZE;
+
+  function appendWithinBudget(result, fragment) {
+    const text = String(fragment);
+    expansionBudget -= text.length;
+    if (expansionBudget < 0) {
+      throw new Error(`Variable expansion exceeds ${MAX_VARIABLE_EXPANSION_SIZE} characters`);
+    }
+    return result + text;
+  }
 
   function readRawPath(parts) {
     let value = source;
@@ -113,7 +128,10 @@ export function resolveVariables(variables = {}) {
 
   function resolvePathParts(parts) {
     const cacheKey = JSON.stringify(parts);
-    if (resolved.has(cacheKey)) return resolved.get(cacheKey);
+    if (resolved.has(cacheKey)) {
+      includeDependencyDepth(resolvedDepth.get(cacheKey));
+      return resolved.get(cacheKey);
+    }
 
     const cycleStart = resolving.indexOf(cacheKey);
     if (cycleStart !== -1) {
@@ -125,23 +143,47 @@ export function resolveVariables(variables = {}) {
 
     const raw = readRawPath(parts);
     if (!raw.found) return undefined;
+    if (resolving.length >= MAX_VARIABLE_RESOLUTION_DEPTH) {
+      throw new Error(`Variable reference depth exceeds ${MAX_VARIABLE_RESOLUTION_DEPTH}`);
+    }
 
     resolving.push(cacheKey);
+    depthFrames.push(1);
     const value = resolveValue(raw.value, parts);
+    const depth = depthFrames.pop();
     resolving.pop();
     resolved.set(cacheKey, value);
+    resolvedDepth.set(cacheKey, depth);
+    includeDependencyDepth(depth);
     return value;
   }
 
+  function includeDependencyDepth(depth) {
+    if (!depthFrames.length) return;
+    const index = depthFrames.length - 1;
+    depthFrames[index] = Math.max(depthFrames[index], depth + 1);
+    if (depthFrames[index] > MAX_VARIABLE_RESOLUTION_DEPTH) {
+      throw new Error(`Variable reference depth exceeds ${MAX_VARIABLE_RESOLUTION_DEPTH}`);
+    }
+  }
+
   function resolveString(value) {
-    return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
+    let output = "";
+    let cursor = 0;
+    for (const match of value.matchAll(VARIABLE_PATTERN)) {
+      output = appendWithinBudget(output, value.slice(cursor, match.index));
+      const path = match[1];
       const parts = String(path).split(".");
-      if (!readRawPath(parts).found) return match;
-      const replacement = resolvePathParts(parts);
-      if (replacement === null) return "";
-      if (typeof replacement === "object") return JSON.stringify(replacement);
-      return String(replacement);
-    });
+      let replacement = match[0];
+      if (readRawPath(parts).found) {
+        replacement = resolvePathParts(parts);
+        if (replacement === null) replacement = "";
+        else if (typeof replacement === "object") replacement = JSON.stringify(replacement);
+      }
+      output = appendWithinBudget(output, replacement);
+      cursor = match.index + match[0].length;
+    }
+    return appendWithinBudget(output, value.slice(cursor));
   }
 
   function resolveValue(value, parts) {

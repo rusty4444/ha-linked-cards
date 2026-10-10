@@ -90,6 +90,30 @@ describe("template helpers", () => {
     }, {})).toThrow("Circular variable reference detected: first -> second -> first");
   });
 
+  it("bounds deeply nested variable dependency chains", () => {
+    const variables = { value0: "done" };
+    for (let index = 1; index <= 33; index++) {
+      variables[`value${index}`] = `\${value${index - 1}}`;
+    }
+
+    expect(() => renderTemplate({
+      variables,
+      card: { type: "markdown", content: "${value33}" },
+    }, {})).toThrow("Variable reference depth exceeds 32");
+  });
+
+  it("bounds acyclic variable output expansion", () => {
+    const variables = { value0: "x" };
+    for (let index = 1; index <= 20; index++) {
+      variables[`value${index}`] = `\${value${index - 1}}\${value${index - 1}}`;
+    }
+
+    expect(() => renderTemplate({
+      variables,
+      card: { type: "markdown", content: "${value20}" },
+    }, {})).toThrow("Variable expansion exceeds 262144 characters");
+  });
+
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
   });

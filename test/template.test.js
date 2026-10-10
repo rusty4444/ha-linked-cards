@@ -72,11 +72,13 @@ describe("template helpers", () => {
     const rendered = applyVariables({
       "${number}": "numeric key",
       "${config}": "object key",
-    }, { number: 10, config: { foo: "bar" } });
+      "${items}": "array key",
+    }, { number: 10, config: { foo: "bar" }, items: ["one", "two"] });
 
     expect(rendered).toEqual({
       "10": "numeric key",
-      "[object Object]": "object key",
+      '{"foo":"bar"}': "object key",
+      '["one","two"]': "array key",
     });
   });
 

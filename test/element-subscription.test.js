@@ -10,6 +10,9 @@ function makeHass(user = { is_admin: true }) {
 }
 
 beforeAll(async () => {
+  window.loadCardHelpers = vi.fn(async () => ({
+    createCardElement: vi.fn(async () => document.createElement("ha-card")),
+  }));
   await import("../src/linked-card.js");
 });
 
@@ -66,5 +69,138 @@ describe("linked-section child state", () => {
     el.hass = updatedHass;
     expect(children[0].hass).toBe(updatedHass);
     expect(children[1].hass).toBe(updatedHass);
+  });
+});
+
+describe.each([
+  ["linked-card", { card: { type: "tile", entity: "light.test" } }],
+  ["linked-section", { section: { title: "Test", cards: [] } }],
+])("%s reconnect rendering", (tag, template) => {
+  it("restarts an initial render invalidated by a detach and re-attach", async () => {
+    let resolveTemplate;
+    const templateResponse = new Promise((resolve) => { resolveTemplate = resolve; });
+    const { hass } = makeHass();
+    hass.callApi = vi.fn(() => templateResponse);
+
+    const el = document.createElement(tag);
+    el.setConfig({ type: `custom:${tag}`, template: `reconnect-${tag}` });
+    document.body.append(el);
+    el.hass = hass;
+    await flush();
+
+    el.remove();
+    document.body.append(el);
+    resolveTemplate({ template });
+    await flush();
+    await flush();
+
+    expect(el.shadowRoot.children).toHaveLength(1);
+    expect(el._child).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("source lifecycle rendering", () => {
+  it("restores an external popup container after reconnect", async () => {
+    const { hass } = makeHass();
+    hass.callWS = vi.fn(async () => ({
+      views: [{ path: "popups", cards: [{ type: "tile", entity: "light.test" }] }],
+    }));
+    const el = document.createElement("linked-card");
+    el.setConfig({
+      type: "custom:linked-card",
+      mode: "source",
+      source_dashboard: "global-cards",
+      source_view: "popups",
+      source_display: "popup",
+    });
+    document.body.append(el);
+    el.hass = hass;
+    await flush();
+    await flush();
+
+    const firstContainer = el._externalSourceContainer;
+    expect(firstContainer?.isConnected).toBe(true);
+    el.remove();
+    expect(firstContainer.isConnected).toBe(false);
+
+    document.body.append(el);
+    await flush();
+    await flush();
+    expect(el._externalSourceContainer?.isConnected).toBe(true);
+    expect(el._externalSourceContainer).not.toBe(firstContainer);
+    el.remove();
+  });
+
+  it("does not let stale source-card creation replace a newer source render", async () => {
+    let releaseStale;
+    const staleCard = new Promise((resolve) => { releaseStale = resolve; });
+    const currentCard = document.createElement("ha-card");
+    window.loadCardHelpers = vi.fn(async () => ({
+      createCardElement: vi.fn((config) => (
+        config.entity === "light.stale" ? staleCard : Promise.resolve(currentCard)
+      )),
+    }));
+
+    const el = document.createElement("linked-card");
+    el.setConfig({
+      type: "custom:linked-card",
+      mode: "source",
+      source_dashboard: "global-cards",
+    });
+    el._hass = {};
+    el._renderToken = 1;
+    const staleRender = el._mountSourceStructure(
+      { type: "masonry", cards: [{ type: "tile", entity: "light.stale" }] },
+      "stale",
+      1,
+      1,
+    );
+    el._renderToken = 2;
+    await el._mountSourceStructure(
+      { type: "masonry", cards: [{ type: "tile", entity: "light.current" }] },
+      "current",
+      2,
+      1,
+    );
+    releaseStale(document.createElement("ha-card"));
+    await staleRender;
+
+    expect(el._lastChildKey).toBe("current");
+    expect(el._cards).toEqual([currentCard]);
+    expect(el.shadowRoot.firstElementChild).toBe(el._child);
+  });
+
+  it("does not let a stale linked-section render replace a newer one", async () => {
+    let releaseStale;
+    const staleCard = new Promise((resolve) => { releaseStale = resolve; });
+    const createCardElement = vi.fn((config) => (
+      config.entity === "light.stale"
+        ? staleCard
+        : Promise.resolve(document.createElement("ha-card"))
+    ));
+    window.loadCardHelpers = vi.fn(async () => ({ createCardElement }));
+
+    const el = document.createElement("linked-section");
+    el.setConfig({ type: "custom:linked-section", template: "section" });
+    el._hass = {};
+    el._renderToken = 1;
+    const staleRender = el._mountSection(
+      { cards: [{ type: "tile", entity: "light.stale" }] },
+      "stale",
+      1,
+    );
+    el._renderToken = 2;
+    await el._mountSection(
+      { cards: [{ type: "tile", entity: "light.current" }] },
+      "current",
+      2,
+    );
+    releaseStale(document.createElement("ha-card"));
+    await staleRender;
+
+    expect(el._lastChildKey).toBe("current");
+    expect(el._cards).toHaveLength(1);
+    expect(createCardElement).toHaveBeenCalledTimes(2);
   });
 });

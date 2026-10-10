@@ -76,10 +76,14 @@ Restart Home Assistant, add **Linked Cards** from **Settings → Devices & servi
 
 ### 1. Add a manager card to an admin-only dashboard
 
+Add **Linked Card Manager** from the Home Assistant card picker and set the template id in its visual editor, or use YAML:
+
 ```yaml
 type: custom:linked-card-manager
 template: room-summary
 ```
+
+The configured template id is retained when the dashboard reloads. Inside the manager, use **Stored template** to switch between existing templates or **New template…** to create another one.
 
 Paste and save this master template:
 
@@ -291,6 +295,9 @@ Rules:
 
 The `custom:linked-card-manager` card can:
 
+- choose any stored template from a selector;
+- retain a different selected template for each manager card via its visual editor;
+- create a new template without replacing an existing template with another id;
 - save and delete stored templates;
 - export the selected template as JSON;
 - export all templates as a JSON archive;

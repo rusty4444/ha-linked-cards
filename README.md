@@ -282,6 +282,8 @@ Rules:
 - `card` is required and must be a Lovelace card object.
 - `variables` is optional and supplies defaults.
 - Instance variables override template defaults.
+- Variables may reference other variables, including nested paths. References are resolved after instance overrides are merged, so a derived value such as `"switch.${entity_base_name}_switch"` follows an overridden `entity_base_name` automatically.
+- Circular variable references are rejected with an error that identifies the dependency chain.
 - Placeholders work in strings and object keys: `${area}`, `${entity}`, `${nested.value}`.
 - Undeclared placeholders are left exactly as written, so JavaScript template literals inside custom-card code blocks (for example `custom:button-card` using `${state}` or `${variables.foo}`) survive rendering untouched.
 - A variable declared as `null` renders as an empty string. Use that when a placeholder should deliberately collapse to nothing.

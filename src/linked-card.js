@@ -217,13 +217,19 @@ class LinkedCard extends HTMLElement {
     };
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
+    if (this._hass && this.config && !this._child) this._scheduleRender();
   }
 
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
-    this._externalSourceContainer?.remove();
+    const externalContainer = this._externalSourceContainer;
+    externalContainer?.remove();
     this._externalSourceContainer = null;
+    if (this._child === externalContainer) {
+      this._child = null;
+      this._lastChildKey = null;
+    }
     this._templateSub.release();
     if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
@@ -294,16 +300,13 @@ class LinkedCard extends HTMLElement {
       return;
     }
 
-    this._externalSourceContainer?.remove();
-    this._externalSourceContainer = null;
-
     const displayMode = this.config.source_display || this.config.display || "inline";
     const edit = isEditMode();
     const wrapper = document.createElement("div");
     wrapper.className = "linked-card-source";
     wrapper.style.display = "grid";
     wrapper.style.gap = "8px";
-    this._cards = [];
+    let cards = [];
 
     if (edit) {
       wrapper.append(statusCard({
@@ -315,19 +318,22 @@ class LinkedCard extends HTMLElement {
     }
 
     if (structure.type === "sections") {
-      const sections = await this._createSectionElements(structure);
+      const created = await this._createSectionElements(structure);
       if (token !== this._renderToken) return;
-      sections.forEach((section) => wrapper.append(section));
+      cards = created.cards;
+      created.sections.forEach((section) => wrapper.append(section));
     } else {
-      const cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
+      cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
       if (token !== this._renderToken) return;
       cards.forEach((card) => {
         card.hass = this._hass;
-        this._cards.push(card);
         wrapper.append(card);
       });
     }
 
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    this._cards = cards;
     this._child = wrapper;
     this._lastChildKey = childKey;
     if (displayMode === "popup" && !edit) {
@@ -347,6 +353,7 @@ class LinkedCard extends HTMLElement {
 
   async _createSectionElements(structure) {
     const sections = [];
+    const allCards = [];
     for (const sectionConfig of structure.sections || []) {
       const section = document.createElement("div");
       section.className = "linked-card-source-section";
@@ -359,12 +366,12 @@ class LinkedCard extends HTMLElement {
         const columns = cardConfig.grid_options?.columns || 12;
         card.style.gridColumn = `span ${Math.min(12, Math.max(1, Number(columns) || 12))}`;
         card.hass = this._hass;
-        this._cards.push(card);
+        allCards.push(card);
         section.append(card);
       });
       sections.push(section);
     }
-    return sections;
+    return { sections, cards: allCards };
   }
 
   async _mountChild(renderedConfig, childKey, token) {
@@ -777,7 +784,7 @@ class LinkedSection extends HTMLElement {
     this._editModeChanged = () => this._scheduleRender();
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
-    if (this._hass && this.renderRequested) this._scheduleRender();
+    if (this._hass && this.config && (this.renderRequested || !this._child)) this._scheduleRender();
   }
 
   disconnectedCallback() {
@@ -863,6 +870,7 @@ class LinkedSection extends HTMLElement {
 
     const sectionGrid = section.grid_options?.columns || 4;
     const cards = await Promise.all((section.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+    if (token !== this._renderToken) return;
     cards.forEach((card, index) => {
       const cardConfig = section.cards[index] || {};
       const columns = Number(cardConfig.grid_options?.columns) || sectionGrid;

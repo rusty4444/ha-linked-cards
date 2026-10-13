@@ -285,6 +285,7 @@ Rules:
 - Variables may reference other variables, including nested paths. References are resolved after instance overrides are merged, so a derived value such as `"switch.${entity_base_name}_switch"` follows an overridden `entity_base_name` automatically.
 - Circular variable references are rejected with an error that identifies the dependency chain.
 - Placeholders work in strings and object keys: `${area}`, `${entity}`, `${nested.value}`.
+- A whole-value placeholder such as `"${columns}"` preserves the variable's native number, boolean, object, or array type. A placeholder embedded in a larger string still uses string interpolation.
 - Undeclared placeholders are left exactly as written, so JavaScript template literals inside custom-card code blocks (for example `custom:button-card` using `${state}` or `${variables.foo}`) survive rendering untouched.
 - A variable declared as `null` renders as an empty string. Use that when a placeholder should deliberately collapse to nothing.
 - Template ids may contain letters, numbers, `.`, `_`, and `-` only.
@@ -426,7 +427,7 @@ Use one template for routers, servers, NAS devices, or 3D printers.
 - Source-dashboard configs are cached in the browser for 60 seconds.
 - Live template updates need an administrator account. Other users see template changes after a full browser or app reload (for example a wall tablet logged in as a non-admin user).
 - The manager's template body remains JSON so any Lovelace/custom card can be represented exactly. Use source-dashboard mode when you want to author the shared card itself with Home Assistant's native visual editor.
-- Variables are string interpolation, not arbitrary JavaScript or Jinja. This is intentional for safety and portability.
+- Variables support safe placeholder substitution, not arbitrary JavaScript or Jinja. This is intentional for safety and portability.
 - A mistyped variable name renders literally as `${typo}` rather than blanking out, because an unresolved placeholder is indistinguishable from a JavaScript template literal that belongs to the child card.
 - Cross-dashboard use works because templates are stored globally by the integration, not inside a single dashboard config.
 

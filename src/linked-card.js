@@ -187,6 +187,9 @@ class LinkedCard extends HTMLElement {
   }
 
   setConfig(config) {
+    if (!isSourceMode(config) && Object.prototype.hasOwnProperty.call(config, "template_vars")) {
+      throw new Error("linked-card uses `variables` for overrides, not `template_vars`");
+    }
     if (isSourceMode(config)) {
       if (!config.source_dashboard || typeof config.source_dashboard !== "string") {
         throw new Error("linked-card source mode requires `source_dashboard`");

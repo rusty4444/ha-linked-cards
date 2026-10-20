@@ -605,7 +605,7 @@ class LinkedCardManagerEditor extends HTMLElement {
       </style>
       <label>Template id to open
         <input id="template" placeholder="room-summary" />
-        <span class="hint">Each manager card keeps this selection after a dashboard reload.</span>
+        <span class="hint">Set the template opened after a dashboard reload. Choosing a template inside the manager is temporary.</span>
       </label>`;
     const input = this.shadowRoot.getElementById("template");
     input.value = this._config?.template || "";
@@ -626,6 +626,7 @@ class LinkedCardManager extends HTMLElement {
     const previousTemplate = this.config?.template;
     this.config = config || {};
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (previousTemplate !== this.config.template) this._selectedTemplate = undefined;
     if (this.loaded && previousTemplate !== this.config.template && this._hass) {
       this.loaded = false;
       this.load();
@@ -637,14 +638,21 @@ class LinkedCardManager extends HTMLElement {
     if (!this.loaded) this.load();
   }
 
-  async load() {
+  async load(failureContext = "Could not load templates") {
     this.loaded = true;
     try {
       cacheInvalidate();
       const templates = await fetchAllTemplates(this._hass);
       this.render(templates);
+      return true;
     } catch (err) {
-      this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
+      this.loaded = false;
+      if (this.shadowRoot.getElementById("status")) {
+        this.status(`${failureContext}: ${err.message}`, true);
+      } else {
+        this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
+      }
+      return false;
     }
   }
 
@@ -653,7 +661,7 @@ class LinkedCardManager extends HTMLElement {
     const configured = this.config.template;
     // A configured id is authoritative even before that template exists. Do
     // not silently open and risk overwriting the first stored template.
-    const selected = configured || ids[0] || "room-summary";
+    const selected = this._selectedTemplate ?? configured ?? ids[0] ?? "room-summary";
     const value = JSON.stringify(templates[selected] || demoTemplate(), null, 2);
     this.shadowRoot.innerHTML = `
       <style>
@@ -676,7 +684,7 @@ class LinkedCardManager extends HTMLElement {
             <select id="stored-template">
               <option value="">New template…</option>
             </select>
-            <div class="hint">Choose a saved template to edit, or select “New template…” to start another one.</div>
+            <div class="hint">Choose a saved template to edit, or select “New template…” to start another one. This choice is temporary; set the template id in the card editor to keep it after a dashboard reload.</div>
           </div>
           <div class="row">
             <label>Template id</label>
@@ -724,14 +732,13 @@ class LinkedCardManager extends HTMLElement {
   _selectTemplate(id, templates) {
     const selectedTemplate = templates[id];
     if (!selectedTemplate) {
-      this.config = { ...(this.config || {}) };
-      delete this.config.template;
+      this._selectedTemplate = "";
       this.shadowRoot.getElementById("template-id").value = "";
       this.shadowRoot.getElementById("template-json").value = JSON.stringify(demoTemplate(), null, 2);
       this.status("Enter a unique template id, then edit and save the JSON.");
       return;
     }
-    this.config = { ...(this.config || {}), template: id };
+    this._selectedTemplate = id;
     this.shadowRoot.getElementById("template-id").value = id;
     this.shadowRoot.getElementById("template-json").value = JSON.stringify(selectedTemplate, null, 2);
     this.status(`Loaded '${id}'.`);
@@ -756,10 +763,11 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("POST", `${API_ROOT}/${encodeURIComponent(id)}`, payload);
       cacheInvalidate();
-      this.config = { ...(this.config || {}), template: id };
+      this._selectedTemplate = id;
       this.loaded = false;
-      await this.load();
-      this.status(`Saved '${id}'. Refresh dashboards that use it.`);
+      if (await this.load(`Saved '${id}', but could not reload templates`)) {
+        this.status(`Saved '${id}'. Refresh dashboards that use it.`);
+      }
     } catch (err) {
       this.status(err.message, true);
     }
@@ -771,13 +779,11 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("DELETE", `${API_ROOT}/${encodeURIComponent(id)}`);
       cacheInvalidate();
-      if (this.config?.template === id) {
-        this.config = { ...this.config };
-        delete this.config.template;
-      }
+      this._selectedTemplate = "";
       this.loaded = false;
-      await this.load();
-      this.status(`Deleted '${id}'.`);
+      if (await this.load(`Deleted '${id}', but could not reload templates`)) {
+        this.status(`Deleted '${id}'.`);
+      }
     } catch (err) {
       this.status(err.message, true);
     }

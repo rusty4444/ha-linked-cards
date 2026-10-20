@@ -217,12 +217,14 @@ class LinkedCard extends HTMLElement {
     };
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
-    if (this._hass && this.config && !this._child) this._scheduleRender();
+    if (this._hass && this.config && (this.renderRequested || !this._child)) this._scheduleRender();
   }
 
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
+    // A pending replacement may be invalidated even while the old child still exists.
+    this.renderRequested = true;
     const externalContainer = this._externalSourceContainer;
     externalContainer?.remove();
     this._externalSourceContainer = null;
@@ -397,6 +399,9 @@ class LinkedCard extends HTMLElement {
 
   showError(err) {
     this.attachShadowIfNeeded();
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    this._cards = null;
     this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
     this._child = null;
     this._lastChildKey = null;
@@ -790,6 +795,7 @@ class LinkedSection extends HTMLElement {
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
+    this.renderRequested = true;
     this._externalSourceContainer?.remove();
     this._externalSourceContainer = null;
     this._templateSub.release();

@@ -216,6 +216,23 @@ describe("template helpers", () => {
     expect(card.content).toBe(content);
   });
 
+  it("bounds expansion when a card repeats a valid-sized variable", () => {
+    const template = {
+      variables: { blob: "x".repeat(50_000) },
+      card: { type: "markdown", content: "${blob}".repeat(512) },
+    };
+    expect(JSON.stringify(template).length).toBeLessThan(100_000);
+    expect(() => renderTemplate(template)).toThrow("Variable expansion exceeds 262144 characters");
+  });
+
+  it("bounds repeated native object substitutions in a card and a section", () => {
+    const variables = { detail: { text: "x".repeat(50_000) } };
+    const card = { type: "custom:test-card", values: Array(6).fill("${detail}") };
+    expect(() => renderTemplate({ variables, card })).toThrow("Variable expansion exceeds 262144 characters");
+    expect(() => renderSection({ variables, section: { title: "Test", cards: [card] } }))
+      .toThrow("Variable expansion exceeds 262144 characters");
+  });
+
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
   });

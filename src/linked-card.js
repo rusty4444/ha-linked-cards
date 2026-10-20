@@ -4,7 +4,7 @@ import { countSourceCards, extractSourceStructure, fetchDashboardConfig } from "
 
 const API_ROOT = "linked_cards/templates";
 const TEMPLATE_UPDATED_EVENT = "linked_cards_template_updated";
-const VERSION = "0.2.0";
+const VERSION = "0.3.21";
 
 const templateCache = new Map();
 const templateInflight = new Map();
@@ -118,6 +118,7 @@ function configKey(config) {
     template: config.template || null,
     source_dashboard: config.source_dashboard || null,
     source_view: config.source_view || null,
+    source_display: sourceDisplayMode(config),
     variables: config.variables || null,
     fallback: config.fallback || null,
     card_size: config.card_size ?? null,
@@ -126,6 +127,10 @@ function configKey(config) {
 
 function isSourceMode(config) {
   return config?.mode === "source" || Boolean(config?.source_dashboard);
+}
+
+function sourceDisplayMode(config) {
+  return config?.source_display || config?.display || "inline";
 }
 
 function findHuiRoot() {
@@ -206,7 +211,7 @@ class LinkedCard extends HTMLElement {
     this._lastConfigKey = key;
     this.attachShadowIfNeeded();
     this.renderRequested = true;
-    if (this._hass) this._scheduleRender();
+    if (this._connected && this._hass) this._scheduleRender();
   }
 
   attachShadowIfNeeded() {
@@ -244,7 +249,7 @@ class LinkedCard extends HTMLElement {
     if (this._child) this._child.hass = hass;
     this._cards?.forEach((card) => { card.hass = hass; });
     if (this._connected) this._templateSub.ensure(hass);
-    if (this.renderRequested) this._scheduleRender();
+    if (this._connected && this.renderRequested) this._scheduleRender();
   }
 
   _handleTemplateUpdate(event) {
@@ -293,6 +298,7 @@ class LinkedCard extends HTMLElement {
     const childKey = `source:${JSON.stringify({
       source_dashboard: this.config.source_dashboard,
       source_view: this.config.source_view || "",
+      display: sourceDisplayMode(this.config),
       structure,
       edit: isEditMode(),
     })}`;
@@ -305,7 +311,7 @@ class LinkedCard extends HTMLElement {
       return;
     }
 
-    const displayMode = this.config.source_display || this.config.display || "inline";
+    const displayMode = sourceDisplayMode(this.config);
     const edit = isEditMode();
     const wrapper = document.createElement("div");
     wrapper.className = "linked-card-source";

@@ -58,6 +58,10 @@ type: module
 
 Or add it from **Settings → Dashboards → Resources**.
 
+### Upgrading
+
+After a HACS update, restart Home Assistant and refresh the browser or app so the bundled card is reloaded. If the browser still shows an older card version, change the dashboard resource URL to `/linked-cards/linked-card.js?v=0.3.21` in **Settings → Dashboards → Resources**, then reload the dashboard. Keep only one Linked Cards resource entry.
+
 ### Manual install
 
 Copy this folder into Home Assistant:
@@ -194,6 +198,8 @@ source_display: popup
 `source_display: popup` mounts the source cards invisibly under the Lovelace root in normal view mode. In edit mode, the card shows a status panel with the dashboard, view, display mode, and loaded card count.
 
 This pattern works well for Bubble Card pop-ups defined once on a source dashboard and opened from buttons on other dashboards.
+
+Navigation from one linked Bubble Card pop-up to another across views or dashboards is still being investigated in [issue #57](https://github.com/rusty4444/ha-linked-cards/issues/57). If you encounter it, please share both pop-up configurations, the source and target view configurations, and whether the URL hash changes when the button is pressed.
 
 ## Linked Sections
 
@@ -465,12 +471,11 @@ Build output is copied to:
 custom_components/linked_cards/www/linked-card.js
 ```
 
-## Validation performed
+## Validation
 
-- Vitest unit tests for template id validation, recursive variable rendering, default/override behaviour, source-dashboard structure extraction, editor wiring, live event wiring, and package layout.
-- ESBuild bundle generation.
-- Python syntax compilation for the Home Assistant custom component.
-- README verified for v0.2.0 feature coverage: source-dashboard mode, visual editor, live events, export/import, and updated roadmap.
+- Vitest covers template validation and variable types, variable and rendered-card expansion limits, source-dashboard display changes and reconnects, manager selection, visual-editor recovery, and live events.
+- `npm run check` runs the JavaScript tests and rebuilds the bundled card; `python3 -m pytest -q test/test_validation.py` checks template validation, and `python3 -m compileall -q custom_components/linked_cards` checks Python syntax.
+- Browser-level Home Assistant and Bubble Card compatibility should be checked in your own dashboard after upgrading.
 
 This project was developed with the assistance of AI tools.
 

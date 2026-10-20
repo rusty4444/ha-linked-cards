@@ -29,6 +29,59 @@ describe("template helpers", () => {
     });
   });
 
+  it("preserves native types for whole-value substitutions", () => {
+    const rendered = applyVariables({
+      number: "${number}",
+      enabled: "${enabled}",
+      config: "${config}",
+      items: "${items}",
+    }, {
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+      items: ["one", "two"],
+    });
+
+    expect(rendered).toEqual({
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+      items: ["one", "two"],
+    });
+  });
+
+  it("keeps embedded variables as string interpolation", () => {
+    const rendered = applyVariables({
+      number: "Value: ${number}",
+      enabled: "Enabled: ${enabled}",
+      config: "Config: ${config}",
+    }, {
+      number: 10,
+      enabled: true,
+      config: { foo: "bar" },
+    });
+
+    expect(rendered).toEqual({
+      number: "Value: 10",
+      enabled: "Enabled: true",
+      config: 'Config: {"foo":"bar"}',
+    });
+  });
+
+  it("keeps rendered object keys as strings", () => {
+    const rendered = applyVariables({
+      "${number}": "numeric key",
+      "${config}": "object key",
+      "${items}": "array key",
+    }, { number: 10, config: { foo: "bar" }, items: ["one", "two"] });
+
+    expect(rendered).toEqual({
+      "10": "numeric key",
+      '{"foo":"bar"}': "object key",
+      '["one","two"]': "array key",
+    });
+  });
+
   it("combines template defaults and instance variables when rendering a linked card", () => {
     const card = renderTemplate({
       variables: { icon: "mdi:lightbulb", area: "living_room" },
@@ -83,6 +136,30 @@ describe("template helpers", () => {
     expect(card.entity).toBe("sensor.plug_1_power");
   });
 
+  it("preserves native types through recursive whole-value references", () => {
+    const card = renderTemplate({
+      variables: {
+        count: 10,
+        count_alias: "${count}",
+        options: { colour: "blue" },
+        options_alias: "${options}",
+      },
+      card: {
+        type: "custom:test-card",
+        count: "${count_alias}",
+        options: "${options_alias}",
+        label: "Count: ${count_alias}",
+      },
+    }, {});
+
+    expect(card).toEqual({
+      type: "custom:test-card",
+      count: 10,
+      options: { colour: "blue" },
+      label: "Count: 10",
+    });
+  });
+
   it("rejects circular variable references with the dependency chain", () => {
     expect(() => renderTemplate({
       variables: { first: "${second}", second: "${first}" },
@@ -112,6 +189,31 @@ describe("template helpers", () => {
       variables,
       card: { type: "markdown", content: "${value20}" },
     }, {})).toThrow("Variable expansion exceeds 262144 characters");
+  });
+
+  it.each([
+    ["object", { content: "x".repeat(60_000) }],
+    ["array", ["x".repeat(60_000)]],
+  ])("bounds repeated whole-value aliases of a typed %s", (_, composite) => {
+    const variables = { composite };
+    for (let index = 0; index < 3; index++) {
+      variables[`alias${index}`] = "${composite}";
+    }
+    const card = { type: "custom:test-card", value: "${alias2}" };
+
+    expect(renderTemplate({ variables, card }, {}).value).toEqual(composite);
+    variables.alias3 = "${composite}";
+    expect(() => renderTemplate({ variables, card }, {}))
+      .toThrow("Variable expansion exceeds 262144 characters");
+  });
+
+  it("counts a whole-value string alias once, not as both interpolation and a typed value", () => {
+    const content = "x".repeat(120_000);
+    const card = renderTemplate({
+      variables: { content, alias: "${content}" },
+      card: { type: "markdown", content: "${alias}" },
+    }, {});
+    expect(card.content).toBe(content);
   });
 
   it("fails loudly when a stored template does not contain a child card", () => {

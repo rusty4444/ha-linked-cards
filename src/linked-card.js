@@ -187,6 +187,9 @@ class LinkedCard extends HTMLElement {
   }
 
   setConfig(config) {
+    if (!isSourceMode(config) && Object.prototype.hasOwnProperty.call(config, "template_vars")) {
+      throw new Error("linked-card uses `variables` for overrides, not `template_vars`");
+    }
     if (isSourceMode(config)) {
       if (!config.source_dashboard || typeof config.source_dashboard !== "string") {
         throw new Error("linked-card source mode requires `source_dashboard`");
@@ -460,6 +463,13 @@ class LinkedCardEditor extends HTMLElement {
 
   _updateField(field, value) {
     const next = { ...(this._config || {}), type: "custom:linked-card" };
+    if (Object.prototype.hasOwnProperty.call(next, "template_vars")) {
+      if (!Object.prototype.hasOwnProperty.call(next, "variables") && !isSourceMode(next)
+        && !(field === "editor_mode" && value === "source")) {
+        next.variables = next.template_vars;
+      }
+      delete next.template_vars;
+    }
     if (field === "editor_mode") {
       if (value === "source") {
         delete next.template;
@@ -501,7 +511,8 @@ class LinkedCardEditor extends HTMLElement {
     const config = this._config || {};
     const mode = this._mode();
     const templateIds = Object.keys(this._templates).sort();
-    const variableText = JSON.stringify(config.variables || {}, null, 2);
+    const overrides = Object.prototype.hasOwnProperty.call(config, "variables") ? config.variables : config.template_vars;
+    const variableText = JSON.stringify(overrides || {}, null, 2);
     this.shadowRoot.innerHTML = `
       <style>
         .wrap { display: grid; gap: 12px; }

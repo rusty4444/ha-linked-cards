@@ -122,6 +122,8 @@ Paste and save this master template:
 
 Use the Home Assistant visual editor when adding `custom:linked-card`. The editor lets you select **Template** mode, choose a stored template, and enter variable overrides as JSON.
 
+In YAML, instance overrides belong under `variables:`, not `template_vars:`. The latter is not supported and now produces a configuration error rather than silently displaying template defaults. A linked-card also needs a `template:` ID, even if you want to use only the defaults from the stored template. To edit stored templates instead, use `type: custom:linked-card-manager` with its own `template:` ID.
+
 Living room:
 
 ```yaml

@@ -16,6 +16,16 @@ beforeAll(async () => {
   await import("../src/linked-card.js");
 });
 
+describe("linked-card template configuration", () => {
+  it("reports the unsupported template_vars key instead of silently using defaults", () => {
+    const el = document.createElement("linked-card");
+    expect(() => el.setConfig({ template: "Room_Card_Plus", template_vars: { room_name: "Hall" } }))
+      .toThrow(/uses `variables` for overrides, not `template_vars`/);
+    expect(() => el.setConfig({ template: "Room_Card_Plus", variables: { room_name: "Hall" } }))
+      .not.toThrow();
+  });
+});
+
 describe.each(["linked-card", "linked-section"])("%s template subscription lifecycle", (tag) => {
   it("does not subscribe while detached, and subscribes once attached", async () => {
     const el = document.createElement(tag);

@@ -75,37 +75,66 @@ export function resolvePath(source, path) {
   }, source);
 }
 
-function renderInterpolatedString(value, variables) {
-  return value.replace(VARIABLE_PATTERN, (match, path) => {
-    const replacement = resolvePath(variables, path);
-    if (replacement === undefined) return match;
-    if (replacement === null) return "";
-    if (typeof replacement === "object") return JSON.stringify(replacement);
-    return String(replacement);
-  });
+function chargeRenderedOutput(budget, length) {
+  if (!budget) return;
+  budget.remaining -= length;
+  if (budget.remaining < 0) {
+    throw new Error(`Variable expansion exceeds ${MAX_VARIABLE_EXPANSION_SIZE} characters`);
+  }
 }
 
-function renderString(value, variables) {
+function renderInterpolatedString(value, variables, budget) {
+  let output = "";
+  let cursor = 0;
+  for (const match of value.matchAll(VARIABLE_PATTERN)) {
+    const literal = value.slice(cursor, match.index);
+    chargeRenderedOutput(budget, literal.length);
+    const replacement = resolvePath(variables, match[1]);
+    const text = replacement === undefined ? match[0]
+      : replacement === null ? ""
+        : typeof replacement === "object" ? JSON.stringify(replacement) : String(replacement);
+    chargeRenderedOutput(budget, text.length);
+    output += literal + text;
+    cursor = match.index + match[0].length;
+  }
+  const suffix = value.slice(cursor);
+  chargeRenderedOutput(budget, suffix.length);
+  return output + suffix;
+}
+
+function renderString(value, variables, budget) {
   const wholeMatch = value.match(WHOLE_VARIABLE_PATTERN);
   if (wholeMatch) {
     const replacement = resolvePath(variables, wholeMatch[1]);
-    if (replacement !== undefined && replacement !== null) return replacement;
+    if (replacement !== undefined && replacement !== null) {
+      chargeRenderedOutput(budget, (typeof replacement === "object"
+        ? JSON.stringify(replacement) : String(replacement)).length);
+      return replacement;
+    }
   }
 
-  return renderInterpolatedString(value, variables);
+  return renderInterpolatedString(value, variables, budget);
 }
 
-export function applyVariables(value, variables = {}) {
-  if (typeof value === "string") return renderString(value, variables);
-  if (Array.isArray(value)) return value.map((item) => applyVariables(item, variables));
+export function applyVariables(value, variables = {}, budget) {
+  if (typeof value === "string") return renderString(value, variables, budget);
+  if (Array.isArray(value)) return value.map((item) => applyVariables(item, variables, budget));
   if (value && typeof value === "object") {
     return Object.fromEntries(
       // Object keys must remain strings even when a whole placeholder resolves
       // to an object or array.
-      Object.entries(value).map(([key, child]) => [renderInterpolatedString(key, variables), applyVariables(child, variables)]),
+      Object.entries(value).map(([key, child]) => [renderInterpolatedString(key, variables, budget), applyVariables(child, variables, budget)]),
     );
   }
   return value;
+}
+
+function boundedRenderedConfig(value, variables) {
+  const rendered = processCardMod(applyVariables(value, variables, { remaining: MAX_VARIABLE_EXPANSION_SIZE }));
+  if (JSON.stringify(rendered).length > MAX_VARIABLE_EXPANSION_SIZE) {
+    throw new Error(`Variable expansion exceeds ${MAX_VARIABLE_EXPANSION_SIZE} characters`);
+  }
+  return rendered;
 }
 
 export function resolveVariables(variables = {}) {
@@ -250,13 +279,13 @@ export function mergeVariables(defaults = {}, overrides = {}) {
 export function renderTemplate(template, variables = {}) {
   if (!template || typeof template !== "object") throw new Error("Template is missing or invalid");
   if (!template.card || typeof template.card !== "object") throw new Error("Template must contain a card object");
-  return processCardMod(applyVariables(template.card, mergeVariables(template.variables, variables)));
+  return boundedRenderedConfig(template.card, mergeVariables(template.variables, variables));
 }
 
 export function renderSection(template, variables = {}) {
   if (!template || typeof template !== "object") throw new Error("Template is missing or invalid");
   if (!template.section || typeof template.section !== "object") throw new Error("Template must contain a section object");
-  const section = applyVariables(template.section, mergeVariables(template.variables, variables));
+  const section = boundedRenderedConfig(template.section, mergeVariables(template.variables, variables));
   if (!Array.isArray(section.cards)) section.cards = [];
-  return processCardMod(section);
+  return section;
 }

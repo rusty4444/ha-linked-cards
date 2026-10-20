@@ -152,6 +152,60 @@ describe.each([
 });
 
 describe("source lifecycle rendering", () => {
+  it("switches an existing source popup to inline and back", async () => {
+    window.loadCardHelpers = vi.fn(async () => ({
+      createCardElement: vi.fn(async () => document.createElement("ha-card")),
+    }));
+    const { hass } = makeHass();
+    hass.callWS = vi.fn(async () => ({ views: [{ cards: [{ type: "tile" }] }] }));
+    const el = document.createElement("linked-card");
+    const config = { type: "custom:linked-card", mode: "source", source_dashboard: "global-cards" };
+    el.setConfig({ ...config, source_display: "popup" });
+    document.body.append(el);
+    el.hass = hass;
+    await flush();
+    await flush();
+    const popup = el._externalSourceContainer;
+    expect(popup?.isConnected).toBe(true);
+
+    el.setConfig({ ...config, source_display: "inline" });
+    await flush();
+    await flush();
+    expect(popup.isConnected).toBe(false);
+    expect(el._externalSourceContainer).toBeNull();
+    expect(el.shadowRoot.querySelector(".linked-card-source")).toBeTruthy();
+
+    el.setConfig({ ...config, source_display: "popup" });
+    await flush();
+    await flush();
+    expect(el._externalSourceContainer?.isConnected).toBe(true);
+    expect(el.shadowRoot.querySelector(".linked-card-source")).toBeNull();
+    el.remove();
+  });
+
+  it("does not mount a source popup until its host connects", async () => {
+    window.loadCardHelpers = vi.fn(async () => ({
+      createCardElement: vi.fn(async () => document.createElement("ha-card")),
+    }));
+    const { hass } = makeHass();
+    hass.callWS = vi.fn(async () => ({ views: [{ cards: [{ type: "tile" }] }] }));
+    const el = document.createElement("linked-card");
+    el.setConfig({ type: "custom:linked-card", mode: "source", source_dashboard: "global-cards", source_display: "popup" });
+    el.hass = hass;
+    await flush();
+    await flush();
+    expect(hass.callWS).not.toHaveBeenCalled();
+    expect(el._externalSourceContainer).toBeUndefined();
+
+    document.body.append(el);
+    await flush();
+    await flush();
+    expect(el._externalSourceContainer?.isConnected).toBe(true);
+    const popup = el._externalSourceContainer;
+    el.remove();
+    expect(popup.isConnected).toBe(false);
+  });
+
   it("restores an external popup container after reconnect", async () => {
     const { hass } = makeHass();
     hass.callWS = vi.fn(async () => ({

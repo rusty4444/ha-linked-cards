@@ -473,7 +473,7 @@ custom_components/linked_cards/www/linked-card.js
 
 ## Validation
 
-- Vitest covers template validation and variable types, recursive expansion limits, source-dashboard rendering and reconnects, manager selection, visual-editor recovery, and live events.
+- Vitest covers template validation and variable types, variable and rendered-card expansion limits, source-dashboard display changes and reconnects, manager selection, visual-editor recovery, and live events.
 - `npm run check` runs the JavaScript tests and rebuilds the bundled card; `python3 -m pytest -q test/test_validation.py` checks template validation, and `python3 -m compileall -q custom_components/linked_cards` checks Python syntax.
 - Browser-level Home Assistant and Bubble Card compatibility should be checked in your own dashboard after upgrading.
 

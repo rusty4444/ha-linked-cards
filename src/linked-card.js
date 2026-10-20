@@ -217,13 +217,21 @@ class LinkedCard extends HTMLElement {
     };
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
+    if (this._hass && this.config && (this.renderRequested || !this._child)) this._scheduleRender();
   }
 
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
-    this._externalSourceContainer?.remove();
+    // A pending replacement may be invalidated even while the old child still exists.
+    this.renderRequested = true;
+    const externalContainer = this._externalSourceContainer;
+    externalContainer?.remove();
     this._externalSourceContainer = null;
+    if (this._child === externalContainer) {
+      this._child = null;
+      this._lastChildKey = null;
+    }
     this._templateSub.release();
     if (this._editModeChanged) window.removeEventListener("lovelace-edit-mode-changed", this._editModeChanged);
   }
@@ -294,16 +302,13 @@ class LinkedCard extends HTMLElement {
       return;
     }
 
-    this._externalSourceContainer?.remove();
-    this._externalSourceContainer = null;
-
     const displayMode = this.config.source_display || this.config.display || "inline";
     const edit = isEditMode();
     const wrapper = document.createElement("div");
     wrapper.className = "linked-card-source";
     wrapper.style.display = "grid";
     wrapper.style.gap = "8px";
-    this._cards = [];
+    let cards = [];
 
     if (edit) {
       wrapper.append(statusCard({
@@ -315,19 +320,22 @@ class LinkedCard extends HTMLElement {
     }
 
     if (structure.type === "sections") {
-      const sections = await this._createSectionElements(structure);
+      const created = await this._createSectionElements(structure);
       if (token !== this._renderToken) return;
-      sections.forEach((section) => wrapper.append(section));
+      cards = created.cards;
+      created.sections.forEach((section) => wrapper.append(section));
     } else {
-      const cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
+      cards = await Promise.all((structure.cards || []).map((cardConfig) => createCardElement(processCardMod(cardConfig))));
       if (token !== this._renderToken) return;
       cards.forEach((card) => {
         card.hass = this._hass;
-        this._cards.push(card);
         wrapper.append(card);
       });
     }
 
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    this._cards = cards;
     this._child = wrapper;
     this._lastChildKey = childKey;
     if (displayMode === "popup" && !edit) {
@@ -347,6 +355,7 @@ class LinkedCard extends HTMLElement {
 
   async _createSectionElements(structure) {
     const sections = [];
+    const allCards = [];
     for (const sectionConfig of structure.sections || []) {
       const section = document.createElement("div");
       section.className = "linked-card-source-section";
@@ -359,12 +368,12 @@ class LinkedCard extends HTMLElement {
         const columns = cardConfig.grid_options?.columns || 12;
         card.style.gridColumn = `span ${Math.min(12, Math.max(1, Number(columns) || 12))}`;
         card.hass = this._hass;
-        this._cards.push(card);
+        allCards.push(card);
         section.append(card);
       });
       sections.push(section);
     }
-    return sections;
+    return { sections, cards: allCards };
   }
 
   async _mountChild(renderedConfig, childKey, token) {
@@ -390,6 +399,9 @@ class LinkedCard extends HTMLElement {
 
   showError(err) {
     this.attachShadowIfNeeded();
+    this._externalSourceContainer?.remove();
+    this._externalSourceContainer = null;
+    this._cards = null;
     this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
     this._child = null;
     this._lastChildKey = null;
@@ -566,10 +578,71 @@ class LinkedCardEditor extends HTMLElement {
   }
 }
 
-class LinkedCardManager extends HTMLElement {
+class LinkedCardManagerEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+  }
+
   setConfig(config) {
+    this._config = { ...(config || {}) };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  _updateTemplate(value) {
+    const next = {
+      ...(this._config || {}),
+      type: "custom:linked-card-manager",
+      template: value.trim(),
+    };
+    this._config = next;
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: next },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  _render() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.innerHTML = `
+      <style>
+        label { display: grid; gap: 6px; font-weight: 600; }
+        input { box-sizing: border-box; width: 100%; font: inherit; }
+        .hint { color: var(--secondary-text-color); font-size: 12px; font-weight: 400; }
+      </style>
+      <label>Template id to open
+        <input id="template" placeholder="room-summary" />
+        <span class="hint">Set the template opened after a dashboard reload. Choosing a template inside the manager is temporary.</span>
+      </label>`;
+    const input = this.shadowRoot.getElementById("template");
+    input.value = this._config?.template || "";
+    input.addEventListener("change", (event) => this._updateTemplate(event.target.value));
+  }
+}
+
+class LinkedCardManager extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("linked-card-manager-editor");
+  }
+
+  static getStubConfig() {
+    return { type: "custom:linked-card-manager", template: "room-summary" };
+  }
+
+  setConfig(config) {
+    const previousTemplate = this.config?.template;
     this.config = config || {};
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (previousTemplate !== this.config.template) this._selectedTemplate = undefined;
+    if (this.loaded && previousTemplate !== this.config.template && this._hass) {
+      this.loaded = false;
+      this.load();
+    }
   }
 
   set hass(hass) {
@@ -577,27 +650,37 @@ class LinkedCardManager extends HTMLElement {
     if (!this.loaded) this.load();
   }
 
-  async load() {
+  async load(failureContext = "Could not load templates") {
     this.loaded = true;
     try {
       cacheInvalidate();
       const templates = await fetchAllTemplates(this._hass);
       this.render(templates);
+      return true;
     } catch (err) {
-      this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
+      this.loaded = false;
+      if (this.shadowRoot.getElementById("status")) {
+        this.status(`${failureContext}: ${err.message}`, true);
+      } else {
+        this.shadowRoot.replaceChildren(errorCard(err.message, err.stack));
+      }
+      return false;
     }
   }
 
   render(templates) {
     const ids = Object.keys(templates).sort();
-    const selected = this.config.template || ids[0] || "room-summary";
+    const configured = this.config.template;
+    // A configured id is authoritative even before that template exists. Do
+    // not silently open and risk overwriting the first stored template.
+    const selected = this._selectedTemplate ?? configured ?? ids[0] ?? "room-summary";
     const value = JSON.stringify(templates[selected] || demoTemplate(), null, 2);
     this.shadowRoot.innerHTML = `
       <style>
         ha-card { overflow: hidden; }
         .wrap { padding: 16px; display: grid; gap: 12px; }
         label { font-weight: 600; }
-        input, textarea { box-sizing: border-box; width: 100%; font: inherit; }
+        input, select, textarea { box-sizing: border-box; width: 100%; font: inherit; }
         textarea { min-height: 340px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
         .row { display: grid; gap: 6px; }
         .actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -608,6 +691,13 @@ class LinkedCardManager extends HTMLElement {
       </style>
       <ha-card header="Linked Card Manager">
         <div class="wrap">
+          <div class="row">
+            <label>Stored template</label>
+            <select id="stored-template">
+              <option value="">New template…</option>
+            </select>
+            <div class="hint">Choose a saved template to edit, or select “New template…” to start another one. This choice is temporary; set the template id in the card editor to keep it after a dashboard reload.</div>
+          </div>
           <div class="row">
             <label>Template id</label>
             <input id="template-id" placeholder="room-summary" />
@@ -631,6 +721,15 @@ class LinkedCardManager extends HTMLElement {
         </div>
       </ha-card>`;
 
+    const storedSelect = this.shadowRoot.getElementById("stored-template");
+    for (const id of ids) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      storedSelect.append(option);
+    }
+    storedSelect.value = templates[selected] ? selected : "";
+    storedSelect.addEventListener("change", (event) => this._selectTemplate(event.target.value, templates));
     this.shadowRoot.getElementById("template-id").value = selected;
     this.shadowRoot.getElementById("template-json").value = value;
     this.shadowRoot.getElementById("save").addEventListener("click", () => this.save());
@@ -640,6 +739,21 @@ class LinkedCardManager extends HTMLElement {
     this.shadowRoot.getElementById("export-all").addEventListener("click", () => this.exportAll());
     this.shadowRoot.getElementById("import-template").addEventListener("click", () => this.shadowRoot.getElementById("import-file").click());
     this.shadowRoot.getElementById("import-file").addEventListener("change", (event) => this.importTemplate(event));
+  }
+
+  _selectTemplate(id, templates) {
+    const selectedTemplate = templates[id];
+    if (!selectedTemplate) {
+      this._selectedTemplate = "";
+      this.shadowRoot.getElementById("template-id").value = "";
+      this.shadowRoot.getElementById("template-json").value = JSON.stringify(demoTemplate(), null, 2);
+      this.status("Enter a unique template id, then edit and save the JSON.");
+      return;
+    }
+    this._selectedTemplate = id;
+    this.shadowRoot.getElementById("template-id").value = id;
+    this.shadowRoot.getElementById("template-json").value = JSON.stringify(selectedTemplate, null, 2);
+    this.status(`Loaded '${id}'.`);
   }
 
   status(message, error = false) {
@@ -661,7 +775,11 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("POST", `${API_ROOT}/${encodeURIComponent(id)}`, payload);
       cacheInvalidate();
-      this.status(`Saved '${id}'. Refresh dashboards that use it.`);
+      this._selectedTemplate = id;
+      this.loaded = false;
+      if (await this.load(`Saved '${id}', but could not reload templates`)) {
+        this.status(`Saved '${id}'. Refresh dashboards that use it.`);
+      }
     } catch (err) {
       this.status(err.message, true);
     }
@@ -673,9 +791,11 @@ class LinkedCardManager extends HTMLElement {
     try {
       await this._hass.callApi("DELETE", `${API_ROOT}/${encodeURIComponent(id)}`);
       cacheInvalidate();
-      this.status(`Deleted '${id}'.`);
+      this._selectedTemplate = "";
       this.loaded = false;
-      this.load();
+      if (await this.load(`Deleted '${id}', but could not reload templates`)) {
+        this.status(`Deleted '${id}'.`);
+      }
     } catch (err) {
       this.status(err.message, true);
     }
@@ -777,12 +897,13 @@ class LinkedSection extends HTMLElement {
     this._editModeChanged = () => this._scheduleRender();
     window.addEventListener("lovelace-edit-mode-changed", this._editModeChanged);
     this._templateSub.ensure(this._hass);
-    if (this._hass && this.renderRequested) this._scheduleRender();
+    if (this._hass && this.config && (this.renderRequested || !this._child)) this._scheduleRender();
   }
 
   disconnectedCallback() {
     this._connected = false;
     this._renderToken++;
+    this.renderRequested = true;
     this._externalSourceContainer?.remove();
     this._externalSourceContainer = null;
     this._templateSub.release();
@@ -863,6 +984,7 @@ class LinkedSection extends HTMLElement {
 
     const sectionGrid = section.grid_options?.columns || 4;
     const cards = await Promise.all((section.cards || []).map((cardConfig) => createCardElement(cardConfig)));
+    if (token !== this._renderToken) return;
     cards.forEach((card, index) => {
       const cardConfig = section.cards[index] || {};
       const columns = Number(cardConfig.grid_options?.columns) || sectionGrid;
@@ -907,6 +1029,7 @@ function demoTemplate() {
 
 customElements.define("linked-card", LinkedCard);
 customElements.define("linked-card-editor", LinkedCardEditor);
+customElements.define("linked-card-manager-editor", LinkedCardManagerEditor);
 customElements.define("linked-card-manager", LinkedCardManager);
 customElements.define("linked-section", LinkedSection);
 window.customCards = window.customCards || [];

@@ -1,5 +1,6 @@
 export const TEMPLATE_ID_PATTERN = /^[a-zA-Z0-9_.-]{1,80}$/;
 const VARIABLE_PATTERN = /\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const WHOLE_VARIABLE_PATTERN = /^\$\{\s*([a-zA-Z0-9_.-]+)\s*\}$/;
 const MAX_VARIABLE_RESOLUTION_DEPTH = 32;
 const MAX_VARIABLE_EXPANSION_SIZE = 256 * 1024;
 
@@ -74,8 +75,8 @@ export function resolvePath(source, path) {
   }, source);
 }
 
-function renderString(value, variables) {
-  return value.replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (match, path) => {
+function renderInterpolatedString(value, variables) {
+  return value.replace(VARIABLE_PATTERN, (match, path) => {
     const replacement = resolvePath(variables, path);
     if (replacement === undefined) return match;
     if (replacement === null) return "";
@@ -84,12 +85,24 @@ function renderString(value, variables) {
   });
 }
 
+function renderString(value, variables) {
+  const wholeMatch = value.match(WHOLE_VARIABLE_PATTERN);
+  if (wholeMatch) {
+    const replacement = resolvePath(variables, wholeMatch[1]);
+    if (replacement !== undefined && replacement !== null) return replacement;
+  }
+
+  return renderInterpolatedString(value, variables);
+}
+
 export function applyVariables(value, variables = {}) {
   if (typeof value === "string") return renderString(value, variables);
   if (Array.isArray(value)) return value.map((item) => applyVariables(item, variables));
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [renderString(key, variables), applyVariables(child, variables)]),
+      // Object keys must remain strings even when a whole placeholder resolves
+      // to an object or array.
+      Object.entries(value).map(([key, child]) => [renderInterpolatedString(key, variables), applyVariables(child, variables)]),
     );
   }
   return value;
@@ -105,12 +118,16 @@ export function resolveVariables(variables = {}) {
   const depthFrames = [];
   let expansionBudget = MAX_VARIABLE_EXPANSION_SIZE;
 
-  function appendWithinBudget(result, fragment) {
-    const text = String(fragment);
-    expansionBudget -= text.length;
+  function chargeExpansion(length) {
+    expansionBudget -= length;
     if (expansionBudget < 0) {
       throw new Error(`Variable expansion exceeds ${MAX_VARIABLE_EXPANSION_SIZE} characters`);
     }
+  }
+
+  function appendWithinBudget(result, fragment) {
+    const text = String(fragment);
+    chargeExpansion(text.length);
     return result + text;
   }
 
@@ -167,7 +184,7 @@ export function resolveVariables(variables = {}) {
     }
   }
 
-  function resolveString(value) {
+  function resolveInterpolatedString(value) {
     let output = "";
     let cursor = 0;
     for (const match of value.matchAll(VARIABLE_PATTERN)) {
@@ -186,6 +203,25 @@ export function resolveVariables(variables = {}) {
     return appendWithinBudget(output, value.slice(cursor));
   }
 
+  function resolveString(value) {
+    const wholeMatch = value.match(WHOLE_VARIABLE_PATTERN);
+    if (wholeMatch) {
+      const parts = String(wholeMatch[1]).split(".");
+      if (readRawPath(parts).found) {
+        const replacement = resolvePathParts(parts);
+        if (replacement === null) return "";
+        // A whole-value alias skips interpolation, so charge its emitted value
+        // once here (including the serialized size of native composites).
+        chargeExpansion((typeof replacement === "object"
+          ? JSON.stringify(replacement)
+          : String(replacement)).length);
+        return replacement;
+      }
+    }
+
+    return resolveInterpolatedString(value);
+  }
+
   function resolveValue(value, parts) {
     if (typeof value === "string") return resolveString(value);
     if (Array.isArray(value)) {
@@ -194,7 +230,7 @@ export function resolveVariables(variables = {}) {
     if (value && typeof value === "object") {
       return Object.fromEntries(
         Object.keys(value).map((key) => [
-          resolveString(key),
+          resolveInterpolatedString(key),
           resolvePathParts([...parts, key]),
         ]),
       );
@@ -203,7 +239,7 @@ export function resolveVariables(variables = {}) {
   }
 
   return Object.fromEntries(
-    Object.keys(source).map((key) => [resolveString(key), resolvePathParts([key])]),
+    Object.keys(source).map((key) => [resolveInterpolatedString(key), resolvePathParts([key])]),
   );
 }
 

@@ -118,12 +118,16 @@ export function resolveVariables(variables = {}) {
   const depthFrames = [];
   let expansionBudget = MAX_VARIABLE_EXPANSION_SIZE;
 
-  function appendWithinBudget(result, fragment) {
-    const text = String(fragment);
-    expansionBudget -= text.length;
+  function chargeExpansion(length) {
+    expansionBudget -= length;
     if (expansionBudget < 0) {
       throw new Error(`Variable expansion exceeds ${MAX_VARIABLE_EXPANSION_SIZE} characters`);
     }
+  }
+
+  function appendWithinBudget(result, fragment) {
+    const text = String(fragment);
+    chargeExpansion(text.length);
     return result + text;
   }
 
@@ -205,7 +209,13 @@ export function resolveVariables(variables = {}) {
       const parts = String(wholeMatch[1]).split(".");
       if (readRawPath(parts).found) {
         const replacement = resolvePathParts(parts);
-        return replacement === null ? "" : replacement;
+        if (replacement === null) return "";
+        // A whole-value alias skips interpolation, so charge its emitted value
+        // once here (including the serialized size of native composites).
+        chargeExpansion((typeof replacement === "object"
+          ? JSON.stringify(replacement)
+          : String(replacement)).length);
+        return replacement;
       }
     }
 

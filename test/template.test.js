@@ -191,6 +191,31 @@ describe("template helpers", () => {
     }, {})).toThrow("Variable expansion exceeds 262144 characters");
   });
 
+  it.each([
+    ["object", { content: "x".repeat(60_000) }],
+    ["array", ["x".repeat(60_000)]],
+  ])("bounds repeated whole-value aliases of a typed %s", (_, composite) => {
+    const variables = { composite };
+    for (let index = 0; index < 3; index++) {
+      variables[`alias${index}`] = "${composite}";
+    }
+    const card = { type: "custom:test-card", value: "${alias2}" };
+
+    expect(renderTemplate({ variables, card }, {}).value).toEqual(composite);
+    variables.alias3 = "${composite}";
+    expect(() => renderTemplate({ variables, card }, {}))
+      .toThrow("Variable expansion exceeds 262144 characters");
+  });
+
+  it("counts a whole-value string alias once, not as both interpolation and a typed value", () => {
+    const content = "x".repeat(120_000);
+    const card = renderTemplate({
+      variables: { content, alias: "${content}" },
+      card: { type: "markdown", content: "${alias}" },
+    }, {});
+    expect(card.content).toBe(content);
+  });
+
   it("fails loudly when a stored template does not contain a child card", () => {
     expect(() => renderTemplate({ variables: {} }, {})).toThrow(/card object/);
   });
